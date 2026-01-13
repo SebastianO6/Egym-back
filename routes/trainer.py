@@ -1,10 +1,10 @@
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity
-from decorators import role_required
+from routes.decorators import role_required
 from extensions import db
 from models import Client, WorkoutPlan
 
-trainer_bp = Blueprint("trainer", __name__)
+trainer_bp = Blueprint("trainer", __name__, url_prefix="/trainer")
 
 # ---------------- ASSIGNED CLIENTS ----------------
 
@@ -47,3 +47,14 @@ def create_workout():
     db.session.commit()
 
     return jsonify({"message": "Workout plan created"}), 201
+
+
+
+@trainer_bp.post("/workouts")
+def create_workout():
+    data = request.json
+    wp = WorkoutPlan(**data)
+    db.session.add(wp)
+    db.session.commit()
+    return jsonify({"msg": "Workout scheduled"})
+

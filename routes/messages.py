@@ -1,12 +1,20 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import get_jwt_identity, get_jwt
-from decorators import role_required
+from routes.decorators import role_required
 from extensions import db
 from models import Message, Client
 
 messages_bp = Blueprint("messages", __name__)
 
 # ---------------- SEND MESSAGE ----------------
+
+@messages_bp.post("/")
+def send_message():
+    msg = Message(**request.json)
+    db.session.add(msg)
+    db.session.commit()
+    return jsonify({"msg": "Sent"})
+
 
 @messages_bp.post("/messages")
 @role_required("trainer", "client")

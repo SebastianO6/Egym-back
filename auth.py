@@ -14,13 +14,15 @@ def login():
     if not user or not check_password_hash(user.password, data["password"]):
         return jsonify({"error": "Invalid credentials"}), 401
 
+
     token = create_access_token(
-        identity=str(user.id),
+        identity=user.id,
         additional_claims={
             "role": user.role,
             "gym_id": user.gym_id
         }
     )
+
 
     return jsonify({
         "access_token": token,

@@ -3,12 +3,11 @@ from flask_jwt_extended import get_jwt, get_jwt_identity
 from werkzeug.security import generate_password_hash
 from sqlalchemy import func
 from datetime import datetime
-
-from decorators import role_required
+from routes.decorators import role_required
 from extensions import db
 from models import User, Trainer, Client, Payment, Announcement
 
-gymadmin_bp = Blueprint("gymadmin", __name__)
+gymadmin_bp = Blueprint("gymadmin", __name__, url_prefix="/api/gymadmin")
 
 # ---------------- DASHBOARD ----------------
 
@@ -277,3 +276,32 @@ def add_payment():
     db.session.commit()
 
     return jsonify({"message": "Payment recorded"}), 201
+
+@gymadmin_bp.get("/members")
+@role_required("gymadmin")
+def members():
+    admin = User.query.get(get_jwt_identity())
+    members = User.query.filter_by(gym_id=admin.gym_id, role="client").all()
+
+    return jsonify([
+        {
+            "id": m.id,
+            "email": m.email,
+            "subscription_active": True,
+            "trainer_id": None
+        } for m in members
+    ])
+
+
+@gymadmin_bp.post("/announcements")
+def create_announcement():
+    data = request.json
+    ann = Announcement(
+        gym_id=data["gym_id"],
+        title=data["title"],
+        message=data["message"]
+    )
+    db.session.add(ann)
+    db.session.commit()
+    return jsonify({"msg": "Announcement created"})
+

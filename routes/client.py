@@ -1,10 +1,11 @@
 from flask import Blueprint, jsonify
 from flask_jwt_extended import get_jwt_identity
-from decorators import role_required
+from routes.decorators import role_required
 from models import Client, WorkoutPlan
 from models import Payment
+from models import Subscription
 
-client_bp = Blueprint("client", __name__)
+client_bp = Blueprint("client", __name__, url_prefix="/api/client")
 
 @client_bp.get("/client/workouts")
 @role_required("client")
@@ -43,3 +44,8 @@ def my_payments():
         }
         for p in payments
     ])
+
+@client_bp.get("/subscriptions/<int:user_id>")
+def my_subscription(user_id):
+    sub = Subscription.query.filter_by(user_id=user_id, is_active=True).first()
+    return jsonify({"plan": sub.plan_name if sub else None})
