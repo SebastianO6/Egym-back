@@ -2,59 +2,60 @@ from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity
 from routes.decorators import role_required
 from extensions import db
-from models import Client, WorkoutPlan
+from models import User, WorkoutPlan
 
-trainer_bp = Blueprint("trainer", __name__, url_prefix="/trainer")
+trainer_bp = Blueprint("trainer", __name__, url_prefix="/api/trainer")
 
-# ---------------- ASSIGNED CLIENTS ----------------
+# ---------------- TRAINER DASHBOARD ----------------
 
-@trainer_bp.get("/trainer/clients")
+@trainer_bp.get("/members")
 @role_required("trainer")
-def trainer_clients():
-    trainer_id = int(get_jwt_identity())
+def my_clients():
+    trainer_id = get_jwt_identity()
 
-    clients = Client.query.filter_by(trainer_id=trainer_id).all()
+    clients = User.query.filter_by(
+        role="client",
+        is_active=True
+    ).all()
 
     return jsonify([
         {
-            "client_id": c.id,
-            "subscription_active": c.subscription_active
+            "id": c.id,
+            "email": c.email,
+            "full_name": c.full_name
         }
         for c in clients
     ])
 
-# ---------------- CREATE WORKOUT PLAN ----------------
+# ---------------- WORKOUT PLANS ----------------
 
-@trainer_bp.post("/trainer/workouts")
+@trainer_bp.get("/clients")
 @role_required("trainer")
-def create_workout():
-    trainer_id = int(get_jwt_identity())
+def clients():
+    clients = User.query.filter_by(role="client").all()
+
+    return jsonify({
+        "items": [
+            {
+                "id": c.id,
+                "full_name": c.full_name
+            } for c in clients
+        ]
+    })
+
+@trainer_bp.post("/workout-plans")
+@role_required("trainer")
+def create_plan():
     data = request.json
 
-    client = Client.query.filter_by(
-        id=data["client_id"],
-        trainer_id=trainer_id
-    ).first_or_404()
-
     plan = WorkoutPlan(
-        trainer_id=trainer_id,
-        client_id=client.id,
         title=data["title"],
-        description=data["description"]
+        description=data.get("description"),
+        client_id=data["client_id"],
+        trainer_id=get_jwt_identity()
     )
 
     db.session.add(plan)
     db.session.commit()
 
     return jsonify({"message": "Workout plan created"}), 201
-
-
-
-@trainer_bp.post("/workouts")
-def create_workout():
-    data = request.json
-    wp = WorkoutPlan(**data)
-    db.session.add(wp)
-    db.session.commit()
-    return jsonify({"msg": "Workout scheduled"})
-

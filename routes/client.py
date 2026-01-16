@@ -1,51 +1,92 @@
 from flask import Blueprint, jsonify
-from flask_jwt_extended import get_jwt_identity
+from flask_jwt_extended import jwt_required, get_jwt_identity
 from routes.decorators import role_required
-from models import Client, WorkoutPlan
-from models import Payment
-from models import Subscription
+from models import WorkoutPlan, Payment, Subscription, Announcement, User
 
-client_bp = Blueprint("client", __name__, url_prefix="/api/client")
+client_bp = Blueprint("client", __name__)
 
-@client_bp.get("/client/workouts")
+# -------- WORKOUT PLANS --------
+@client_bp.get("/plans")
+@jwt_required()
 @role_required("client")
-def view_workouts():
-    client_id = int(get_jwt_identity())
+def get_my_plans():
+    user_id = get_jwt_identity()
 
-    client = Client.query.filter_by(id=client_id).first_or_404()
-
-    if not client.subscription_active:
-        return jsonify({"error": "Subscription inactive"}), 403
-
-    plans = WorkoutPlan.query.filter_by(client_id=client.id).all()
+    plans = WorkoutPlan.query.filter_by(client_id=user_id).all()
 
     return jsonify([
         {
+            "id": p.id,
             "title": p.title,
-            "description": p.description,
-            "created_at": p.created_at
+            "duration": p.duration,
+            "exercises": p.exercises
         }
         for p in plans
     ])
 
 
-@client_bp.get("/client/payments")
+# -------- PAYMENTS --------
+@client_bp.get("/payments")
+@jwt_required()
 @role_required("client")
 def my_payments():
-    client_id = int(get_jwt_identity())
+    user_id = get_jwt_identity()
 
-    payments = Payment.query.filter_by(client_id=client_id).all()
+    payments = Payment.query.filter_by(user_id=user_id).order_by(
+        Payment.created_at.desc()
+    ).all()
+
+    return jsonify({
+        "items": [
+            {
+                "id": p.id,
+                "amount": float(p.amount),
+                "method": p.method,
+                "status": p.status,
+                "created_at": p.created_at
+            }
+            for p in payments
+        ]
+    })
+
+
+# -------- SUBSCRIPTION --------
+@client_bp.get("/subscription")
+@jwt_required()
+@role_required("client")
+def my_subscription():
+    user_id = get_jwt_identity()
+
+    sub = Subscription.query.filter_by(
+        user_id=user_id,
+        is_active=True
+    ).first()
+
+    return {
+        "active": bool(sub),
+        "plan": sub.plan_name if sub else None,
+        "start_date": sub.start_date if sub else None,
+        "end_date": sub.end_date if sub else None
+    }
+
+
+# -------- ANNOUNCEMENTS --------
+@client_bp.get("/announcements")
+@jwt_required()
+@role_required("client")
+def client_announcements():
+    user = User.query.get(get_jwt_identity())
+
+    announcements = Announcement.query.filter_by(
+        gym_id=user.gym_id
+    ).order_by(Announcement.created_at.desc()).all()
 
     return jsonify([
         {
-            "amount": p.amount,
-            "status": p.status,
-            "paid_at": p.paid_at
+            "id": a.id,
+            "title": a.title,
+            "message": a.message,
+            "created_at": a.created_at
         }
-        for p in payments
+        for a in announcements
     ])
-
-@client_bp.get("/subscriptions/<int:user_id>")
-def my_subscription(user_id):
-    sub = Subscription.query.filter_by(user_id=user_id, is_active=True).first()
-    return jsonify({"plan": sub.plan_name if sub else None})

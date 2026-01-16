@@ -1,30 +1,33 @@
-from models import User, Gym
 from extensions import db
-
-def get_or_create(model, **kwargs):
-    instance = model.query.filter_by(**kwargs).first()
-    if instance:
-        return instance
-    instance = model(**kwargs)
-    db.session.add(instance)
-    return instance
+from models.user import User
+from models.gym import Gym
 
 def seed():
-    gym = get_or_create(Gym, name="E-Gym")
+    gym = Gym.query.filter_by(name="E-Gym Nairobi").first()
+    if not gym:
+        gym = Gym(name="E-Gym Nairobi", location="CBD")
+        db.session.add(gym)
+        db.session.commit()
 
     users = [
-        ("super@egym.com", "superadmin", None),
-        ("admin@egym.com", "gymadmin", gym.id),
-        ("trainer@egym.com", "trainer", gym.id),
-        ("client@egym.com", "client", gym.id),
+        ("superadmin@test.com", "superadmin"),
+        ("admin@test.com", "gymadmin"),
+        ("trainer@test.com", "trainer"),
+        ("client@test.com", "client"),
     ]
 
-    for email, role, gym_id in users:
-        user = get_or_create(User, email=email)
-        user.role = role
-        user.gym_id = gym_id
-        user.set_password("password123")
-        user.must_change_password = role == "gymadmin"
+    for email, role in users:
+        existing = User.query.filter_by(email=email).first()
+        if existing:
+            continue  # 🔑 prevents duplicate error
+
+        u = User(
+            email=email,
+            full_name=role.capitalize(),
+            role=role,
+            gym_id=gym.id
+        )
+        u.set_password("password123")
+        db.session.add(u)
 
     db.session.commit()
-    print("✅ Seed complete")
