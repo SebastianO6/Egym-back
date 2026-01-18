@@ -1,14 +1,19 @@
 from flask import Blueprint, jsonify, request
 from extensions import db
-from models import Gym, Payment, User
-from sqlalchemy import func
+from models import Gym, User
 from flask_jwt_extended import jwt_required
 from routes.decorators import role_required
 
-superadmin_bp = Blueprint("superadmin", __name__, url_prefix="/api/superadmin")
+superadmin_bp = Blueprint(
+    "superadmin",
+    __name__,
+    url_prefix="/api/superadmin"
+)
 
 
 @superadmin_bp.get("/gyms")
+@jwt_required()
+@role_required("superadmin")
 def get_gyms():
     gyms = Gym.query.all()
     return jsonify([
@@ -19,7 +24,7 @@ def get_gyms():
 
 @superadmin_bp.post("/gyms")
 @jwt_required()
-# @role_required("superadmin")
+@role_required("superadmin")
 def create_gym():
     data = request.get_json()
 
@@ -32,32 +37,14 @@ def create_gym():
 
     return jsonify({"msg": "Gym created"}), 201
 
+
 @superadmin_bp.get("/revenue")
 @jwt_required()
 @role_required("superadmin")
-def revenue():
-    rows = (
-        Payment.query
-        .with_entities(Payment.gym_id, func.sum(Payment.amount))
-        .group_by(Payment.gym_id)
-        .all()
-    )
-
-    total = sum(float(r[1]) for r in rows)
-
-    per_gym = []
-    for gym_id, revenue in rows:
-        gym = Gym.query.get(gym_id)
-        per_gym.append({
-            "gym_id": gym_id,
-            "gym_name": gym.name if gym else "Unknown",
-            "platform_fee": float(revenue),
-            "active_members": 0  # can add later
-        })
-
+def platform_revenue():
     return jsonify({
-        "total_platform_revenue": total,
-        "per_gym": per_gym
+        "total_platform_revenue": 0,
+        "per_gym": []
     })
 
 
@@ -76,4 +63,3 @@ def get_all_users():
         }
         for u in users
     ])
-

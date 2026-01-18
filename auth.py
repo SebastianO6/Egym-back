@@ -24,19 +24,18 @@ def login():
     if not user or not user.check_password(data["password"]):
         return jsonify({"error": "Invalid credentials"}), 401
 
-    # ✅ IMPORTANT: identity = user.id
-    # ✅ IMPORTANT: role added to JWT claims
     access_token = create_access_token(
-        identity=user.id,
+        identity=str(user.id),          
         additional_claims={
-            "role": user.role,
-            "gym_id": user.gym_id
+            "role": user.role,         
+            "email": user.email
         }
     )
 
-    refresh_token = create_refresh_token(
-        identity=user.id
-    )
+    refresh_token = create_refresh_token(identity=str(user.id))
+
+
+
 
     return jsonify({
         "access_token": access_token,
@@ -55,11 +54,11 @@ def login():
 @auth_bp.get("/me")
 @jwt_required()
 def me():
-    user = User.query.get_or_404(get_jwt_identity())
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
 
-    return jsonify({
-        "id": user.id,
-        "email": user.email,
-        "role": user.role,
-        "gym_id": user.gym_id
-    }), 200
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    return jsonify(user.to_dict()), 200
+
