@@ -90,3 +90,23 @@ def client_announcements():
         }
         for a in announcements
     ])
+
+
+@client_bp.get("/membership/me")
+@jwt_required()
+@role_required("client")
+def my_membership():
+    user_id = get_jwt_identity()
+
+    sub = Subscription.query.filter_by(
+        user_id=user_id,
+        is_active=True
+    ).order_by(Subscription.end_date.desc()).first()
+
+    if not sub:
+        return jsonify({"expired": True})
+
+    return jsonify({
+        "due_date": sub.end_date.date().isoformat(),
+        "expired": sub.end_date < datetime.utcnow()
+    })

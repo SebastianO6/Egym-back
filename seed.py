@@ -1,33 +1,61 @@
 from extensions import db
-from models.user import User
-from models.gym import Gym
+from models import Gym, User
+from datetime import datetime
+import secrets
+
 
 def seed():
-    gym = Gym.query.filter_by(name="E-Gym Nairobi").first()
-    if not gym:
-        gym = Gym(name="E-Gym Nairobi", location="CBD")
-        db.session.add(gym)
-        db.session.commit()
+    print("🌱 Seeding database...")
 
-    users = [
-        ("superadmin@test.com", "superadmin"),
-        ("admin@test.com", "gymadmin"),
-        ("trainer@test.com", "trainer"),
-        ("client@test.com", "client"),
-    ]
-
-    for email, role in users:
-        existing = User.query.filter_by(email=email).first()
-        if existing:
-            continue  # 🔑 prevents duplicate error
-
-        u = User(
-            email=email,
-            full_name=role.capitalize(),
-            role=role,
-            gym_id=gym.id
+    # SUPERADMIN
+    if not User.query.filter_by(email="superadmin@egym.com").first():
+        sa = User(
+            email="superadmin@egym.com",
+            role="superadmin",
+            is_active=True
         )
-        u.set_password("password123")
-        db.session.add(u)
+        sa.set_password("Admin123!")
+        db.session.add(sa)
+
+    # GYM
+    gym = Gym.query.filter_by(name="Demo Gym").first()
+    if not gym:
+        gym = Gym(name="Demo Gym", phone="0700000000", address="Nairobi")
+        db.session.add(gym)
+        db.session.flush()
+
+    # GYM ADMIN (INVITED)
+    if not User.query.filter_by(email="C").first():
+        admin = User(
+            email="admin@demogym.com",
+            role="gymadmin",
+            gym_id=gym.id,
+            invite_token=secrets.token_urlsafe(32),
+            invite_expires_at=datetime.utcnow()
+        )
+        db.session.add(admin)
+
+    # TRAINER
+    if not User.query.filter_by(email="trainer@demogym.com").first():
+        trainer = User(
+            email="trainer@demogym.com",
+            role="trainer",
+            gym_id=gym.id,
+            is_active=True
+        )
+        trainer.set_password("Trainer123!")
+        db.session.add(trainer)
+
+    # CLIENT
+    if not User.query.filter_by(email="client@demogym.com").first():
+        client = User(
+            email="client@demogym.com",
+            role="client",
+            gym_id=gym.id,
+            is_active=True
+        )
+        client.set_password("Client123!")
+        db.session.add(client)
 
     db.session.commit()
+    print("✅ Seeding complete")
