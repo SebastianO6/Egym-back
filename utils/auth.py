@@ -21,27 +21,9 @@ def current_admin():
     return admin
 
 
-def invite_user(email, role, gym_id):
-    existing = User.query.filter_by(email=email).first()
-    if existing:
-        abort(400, "User with this email already exists")
 
-    token = secrets.token_urlsafe(32)
 
-    user = User(
-        email=email,
-        role=role,
-        gym_id=gym_id,
-        is_active=False,                # 🔴 IMPORTANT
-        invite_token=token,
-        invite_expires_at=datetime.utcnow() + timedelta(hours=24),
-        password_hash=None,
-        must_change_password=False
-    )
 
-    db.session.add(user)
-    db.session.commit()
 
-    return token
 
 

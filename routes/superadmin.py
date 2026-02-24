@@ -1,7 +1,7 @@
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required
 from extensions import db
-from models import Gym, User
+from models import Gym, User, GymPricing
 from routes.decorators import role_required
 from utils.mailer import send_gymadmin_invite_email
 import secrets
@@ -175,6 +175,35 @@ def delete_gym(gym_id):
     db.session.delete(gym)
     db.session.commit()
     return jsonify({"message": "Gym deleted"}), 200
+
+# Get all pending gym pricing
+@superadmin_bp.get("/pricing/pending")
+@jwt_required()
+@role_required("superadmin")
+def pending_pricing():
+    gyms = GymPricing.query.filter_by(approved=False).all()
+    return jsonify([
+        {
+            "id": p.id,
+            "gym_id": p.gym_id,
+            "gym_name": p.gym.name if p.gym else None,
+            "daily_price": float(p.daily_price),
+            "monthly_price": float(p.monthly_price)
+        }
+        for p in gyms
+    ]), 200
+
+
+# Approve a pricing
+@superadmin_bp.post("/pricing/<int:pricing_id>/approve")
+@jwt_required()
+@role_required("superadmin")
+def approve_pricing(pricing_id):
+    pricing = GymPricing.query.get_or_404(pricing_id)
+    pricing.approved = True
+    db.session.commit()
+
+    return {"message": f"Pricing for {pricing.gym.name} approved"}, 200
 
 
 

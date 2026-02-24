@@ -1,8 +1,6 @@
-from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity
-from extensions import db
-from models.announcement import Announcement
-from models.user import User
+from flask import Blueprint, jsonify
+from flask_jwt_extended import jwt_required, get_jwt
+from models import Announcement
 from routes.decorators import role_required
 
 announcements_bp = Blueprint(
@@ -11,44 +9,21 @@ announcements_bp = Blueprint(
     url_prefix="/api/announcements"
 )
 
-@announcements_bp.post("/")
-@jwt_required()
-@role_required("superadmin", "gymadmin")
-def create_announcement():
-    data = request.get_json() or {}
-    user = User.query.get(int(get_jwt_identity()))
 
-    if not data.get("title") or not data.get("message"):
-        return jsonify({"error": "Title and message required"}), 400
-
-    announcement = Announcement(
-        title=data["title"],
-        message=data["message"],
-        gym_id=user.gym_id,
-        author_id=user.id
-    )
-
-    db.session.add(announcement)
-    db.session.commit()
-
-    return jsonify({"message": "Announcement created"}), 201
-
-
-@announcements_bp.get("/")
+@announcements_bp.get("")
 @jwt_required()
 def list_announcements():
-    user = User.query.get(int(get_jwt_identity()))
+    gym_id = get_jwt().get("gym_id")
+    role = get_jwt().get("role")
 
-    announcements = Announcement.query.filter_by(
-        gym_id=user.gym_id
-    ).order_by(Announcement.created_at.desc()).all()
+    anns = Announcement.query.filter_by(gym_id=gym_id).order_by(
+        Announcement.created_at.desc()
+    ).all()
 
-    return jsonify([
-        {
-            "id": a.id,
-            "title": a.title,
-            "message": a.message,
-            "created_at": a.created_at.isoformat()
-        }
-        for a in announcements
-    ])
+    return jsonify({
+        "items": [
+            a.to_dict() for a in anns
+            if a.tag in ("general", role)
+        ]
+    })
+

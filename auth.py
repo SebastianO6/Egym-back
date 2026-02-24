@@ -12,45 +12,42 @@ from routes.decorators import password_change_only, block_temp_tokens
 from werkzeug.security import generate_password_hash
 
 
-auth_bp = Blueprint("auth", __name__, url_prefix="/api/auth")
+auth_bp = Blueprint("auth", __name__)  # ✅ NO url_prefix here
 
 
-# ---------------- LOGIN ----------------
 @auth_bp.post("/login")
 def login():
     data = request.get_json() or {}
+
     email = data.get("email")
     password = data.get("password")
 
+    if not email or not password:
+        return jsonify({"msg": "Email and password required"}), 400
+
     user = User.query.filter_by(email=email).first()
 
-    if not user or not user.check_password(password):
-        return {"error": "Invalid credentials"}, 401
+    if not user:
+        return jsonify({"msg": "Invalid credentials"}), 401
 
-    if user.invite_token:
-        return {"error": "Account not activated"}, 403
+    if not user.check_password(password):
+        return jsonify({"msg": "Invalid credentials"}), 401
 
-    if not user.is_active:
-        return {"error": "Account disabled"}, 403
+    access_token = create_access_token(
+        identity=str(user.id),
+        additional_claims={
+            "role": user.role,
+            "gym_id": user.gym_id
+        }
+    )
 
-    claims = {
-        "role": user.role,
-        "gym_id": user.gym_id,
-        "pwd_change_only": user.must_change_password
-    }
-
-    access_token = create_access_token(identity=str(user.id), additional_claims=claims)
     refresh_token = create_refresh_token(identity=str(user.id))
 
-    
-
-    return {
+    return jsonify({
         "access_token": access_token,
         "refresh_token": refresh_token,
         "user": user.to_dict()
-    }, 200
-
-
+    }), 200
 
 # ---------------- CURRENT USER ----------------
 @auth_bp.get("/me")
@@ -103,7 +100,6 @@ def force_change_password():
         "user": user.to_dict()
     }), 200
 
-
 @auth_bp.post("/accept-invite")
 def accept_invite():
     data = request.get_json() or {}
@@ -111,38 +107,52 @@ def accept_invite():
     password = data.get("password")
 
     if not token or not password:
-        return {"msg": "Token and password required"}, 400
+        return jsonify({"error": "Token and password are required"}), 400
 
     user = User.query.filter_by(invite_token=token).first()
 
     if not user:
-        return {"msg": "Invite invalid or expired"}, 400
+        return jsonify({"error": "Invalid or expired invite"}), 400
 
     if not user.invite_expires_at or user.invite_expires_at < datetime.utcnow():
-        return {"msg": "Invite invalid or expired"}, 400
+        return jsonify({"error": "Invite has expired"}), 400
+
+    if user.is_active:
+        return jsonify({"error": "Invite already used"}), 400
 
     user.set_password(password)
     user.is_active = True
+    user.must_change_password = False
+
     user.invite_token = None
     user.invite_expires_at = None
-    user.must_change_password = False
 
     db.session.commit()
 
-    access_token = create_access_token(
-        identity=str(user.id),
-        additional_claims={
-            "role": user.role,
-            "gym_id": user.gym_id,
-            "pwd_change_only": False   # ✅ REQUIRED
-        }
-    )
+    return jsonify({
+        "message": "Account activated successfully",
+        "role": user.role
+    }), 200
 
 
-    return {
-        "access_token": access_token,
-        "user": user.to_dict()
-    }, 200
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

@@ -14,6 +14,5 @@ class Gym(db.Model):
     users = db.relationship(
         "User",
         back_populates="gym",
-        cascade="all, delete-orphan",
-        passive_deletes=True
+        cascade="all, delete"
     )

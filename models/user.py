@@ -13,7 +13,7 @@ class User(db.Model):
     password_hash = db.Column(db.String(255), nullable=True)
 
     # -------- Role --------
-    role = db.Column(db.String(30), nullable=False)  # superadmin | gymadmin | trainer | client
+    role = db.Column(db.String(30), nullable=False)
     is_active = db.Column(db.Boolean, default=False)
 
     # -------- Relations --------
@@ -23,14 +23,37 @@ class User(db.Model):
         nullable=True
     )
 
+    # Client → Trainer self reference
     trainer_id = db.Column(
         db.Integer,
         db.ForeignKey("users.id"),
         nullable=True
     )
 
-    # -------- Invite Flow --------
+    # Proper self-referential relationship
+    trainer = db.relationship(
+        "User",
+        remote_side=[id],
+        foreign_keys=[trainer_id],
+        backref=db.backref("clients", lazy="dynamic")
+    )
 
+    gym = db.relationship(
+        "Gym",
+        back_populates="users"
+    )
+
+
+    # -------- Profile --------
+    first_name = db.Column(db.String(100))
+    last_name = db.Column(db.String(100))
+    bio = db.Column(db.Text)
+    phone = db.Column(db.String(20))
+    age = db.Column(db.Integer)
+    goal = db.Column(db.String(255))
+    trainer_notes = db.Column(db.Text)
+
+    # -------- Invite Flow --------
     invite_token = db.Column(db.String(255), unique=True, nullable=True, index=True)
     invite_expires_at = db.Column(db.DateTime, nullable=True)
 
@@ -40,11 +63,11 @@ class User(db.Model):
     # -------- Audit --------
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    # -------- Relationships --------
-    gym = db.relationship("Gym", back_populates="users", foreign_keys=[gym_id])
-    trainer = db.relationship("User", remote_side=[id])
+    # -------- Helpers --------
+    @property
+    def full_name(self):
+        return f"{self.first_name or ''} {self.last_name or ''}".strip()
 
-    # -------- Password helpers --------
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
 
@@ -58,7 +81,15 @@ class User(db.Model):
             "id": self.id,
             "email": self.email,
             "role": self.role,
+            "first_name": self.first_name,
+            "last_name": self.last_name,
+            "full_name": self.full_name,
+            "phone": self.phone,
+            "age": self.age,
+            "goal": self.goal,
             "gym_id": self.gym_id,
-            "is_active": self.is_active,
+            "trainer_id": self.trainer_id,
             "created_at": self.created_at.isoformat()
         }
+
+

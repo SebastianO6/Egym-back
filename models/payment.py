@@ -12,3 +12,15 @@ class Payment(db.Model):
     method = db.Column(db.String(30))
     status = db.Column(db.String(20), default="paid")
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "amount": float(self.amount),
+            "method": self.method,
+            "status": self.status,
+            "created_at": self.created_at.isoformat()
+        }
+
