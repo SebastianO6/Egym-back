@@ -1,7 +1,10 @@
+import os
+from dotenv import load_dotenv
 from flask import Flask
 from flask_cors import CORS
 from extensions import db, migrate, jwt, mail, socketio
 from config import Config
+
 
 
 def create_app():
@@ -22,6 +25,7 @@ def create_app():
     migrate.init_app(app, db)
     jwt.init_app(app)
     socketio.init_app(app)  # ✅ IMPORTANT
+    load_dotenv()
 
     from auth import auth_bp
     from routes.superadmin import superadmin_bp
