@@ -14,16 +14,13 @@ announcements_bp = Blueprint(
 @jwt_required()
 def list_announcements():
     gym_id = get_jwt().get("gym_id")
-    role = get_jwt().get("role")
 
-    anns = Announcement.query.filter_by(gym_id=gym_id).order_by(
+    anns = Announcement.query.filter_by(
+        gym_id=gym_id
+    ).order_by(
         Announcement.created_at.desc()
     ).all()
 
     return jsonify({
-        "items": [
-            a.to_dict() for a in anns
-            if a.tag in ("general", role)
-        ]
+        "items": [a.to_dict() for a in anns]
     })
-

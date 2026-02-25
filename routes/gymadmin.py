@@ -257,6 +257,19 @@ def list_trainers():
         "items": [t.to_dict() for t in trainers]
     }), 200
 
+@gymadmin_bp.get("/trainers/<int:trainer_id>")
+@jwt_required()
+@role_required("gymadmin")
+def get_trainer(trainer_id):
+    admin = current_admin()
+
+    trainer = User.query.filter_by(
+        id=trainer_id,
+        gym_id=admin.gym_id,
+        role="trainer"
+    ).first_or_404()
+
+    return jsonify(trainer.to_dict()), 200
 
 @gymadmin_bp.put("/trainers/<int:id>")
 @role_required("gymadmin")
