@@ -11,6 +11,7 @@ class Announcement(db.Model):
     tag = db.Column(db.String(50), default="general")
     gym_id = db.Column(db.Integer, db.ForeignKey("gyms.id"), nullable=False)
     created_at = db.Column(db.DateTime, default=db.func.now())
+    expires_at = db.Column(db.DateTime, nullable = True )
     author_id = db.Column(
         db.Integer,
         db.ForeignKey("users.id"),

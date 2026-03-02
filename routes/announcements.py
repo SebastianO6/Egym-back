@@ -2,6 +2,8 @@ from flask import Blueprint, jsonify
 from flask_jwt_extended import jwt_required, get_jwt
 from models import Announcement
 from routes.decorators import role_required
+from utils.cleanup import cleanup_expired_announcements
+
 
 announcements_bp = Blueprint(
     "announcements",
@@ -13,6 +15,8 @@ announcements_bp = Blueprint(
 @announcements_bp.get("")
 @jwt_required()
 def list_announcements():
+    cleanup_expired_announcements()
+    
     gym_id = get_jwt().get("gym_id")
 
     anns = Announcement.query.filter_by(

@@ -92,6 +92,9 @@ def member_details(member_id):
         trainer_id=trainer_id
     ).first_or_404()
 
+    # ✅ Get trainer info safely
+    trainer = User.query.get(trainer_id)
+
     subscription = Subscription.query.filter_by(
         user_id=member.id,
         gym_id=gym_id,
@@ -107,9 +110,16 @@ def member_details(member_id):
         "goal": member.goal,
         "notes": member.trainer_notes,
         "active_plan": subscription.plan if subscription else None,
-        "subscription_status": "Active" if subscription else "Inactive"
-    })
+        "subscription_status": "Active" if subscription else "Inactive",
 
+        # ✅ Added trainer info (nothing else changed)
+        "trainer": {
+            "id": trainer.id,
+            "full_name": trainer.full_name,
+            "email": trainer.email,
+            "phone": trainer.phone
+        }
+    })
 
 
 @trainer_bp.get("/members/<int:member_id>/plans")

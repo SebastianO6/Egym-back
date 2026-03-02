@@ -4,6 +4,7 @@ from sqlalchemy import func
 from datetime import datetime, timedelta
 import secrets
 from flask import g
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from extensions import db
 from models import User, Announcement
@@ -106,7 +107,27 @@ def list_members():
         role="client"
     ).all()
 
-    return jsonify({"items": [m.to_dict() for m in members]}), 200
+    result = []
+
+    for m in members:
+        sub = Subscription.query.filter_by(
+            user_id=m.id,
+            gym_id=admin.gym_id,
+            is_active=True
+        ).first()
+
+        data = m.to_dict()
+
+        if sub:
+            data["plan"] = sub.plan
+            data["status"] = "active"
+        else:
+            data["plan"] = None
+            data["status"] = "expired"
+
+        result.append(data)
+
+    return jsonify({"items": result}), 200
 
 
 @gymadmin_bp.get("/members/<int:id>")
@@ -257,19 +278,32 @@ def list_trainers():
         "items": [t.to_dict() for t in trainers]
     }), 200
 
-@gymadmin_bp.get("/trainers/<int:trainer_id>")
-@jwt_required()
+
+@gymadmin_bp.get("/trainers/<int:id>")
 @role_required("gymadmin")
-def get_trainer(trainer_id):
+@gym_required
+@jwt_required()
+def get_trainer(id):
     admin = current_admin()
 
     trainer = User.query.filter_by(
-        id=trainer_id,
+        id=id,
         gym_id=admin.gym_id,
         role="trainer"
     ).first_or_404()
 
-    return jsonify(trainer.to_dict()), 200
+    # Get assigned clients
+    clients = User.query.filter_by(
+        trainer_id=trainer.id,
+        gym_id=admin.gym_id,
+        role="client"
+    ).all()
+
+    data = trainer.to_dict()
+    data["clients"] = [c.to_dict() for c in clients]
+
+    return jsonify(data), 200
+
 
 @gymadmin_bp.put("/trainers/<int:id>")
 @role_required("gymadmin")
@@ -286,6 +320,9 @@ def update_trainer(id):
         role="trainer"
     ).first_or_404()
 
+    trainer.first_name = data.get("first_name", trainer.first_name)
+    trainer.last_name = data.get("last_name", trainer.last_name)
+    trainer.phone = data.get("phone", trainer.phone)
     trainer.bio = data.get("bio", trainer.bio)
     db.session.commit()
 
@@ -347,6 +384,9 @@ def invite_trainer():
         email=email,
         role="trainer",
         gym_id=admin.gym_id,
+        first_name = first_name,
+        last_name = last_name,
+        phone = phone,
         is_active=False,
         invite_token=token,
         invite_expires_at=datetime.utcnow() + timedelta(hours=24),
@@ -485,9 +525,14 @@ def assign_trainer(member_id):
 def list_announcements():
     admin = current_admin()
 
-    anns = Announcement.query.filter_by(
-        gym_id=admin.gym_id
-    ).order_by(Announcement.created_at.desc()).all()
+
+    anns = Announcement.query.filter(
+        Announcement.gym_id == admin.gym_id,
+        (Announcement.expires_at == None) |
+        (Announcement.expires_at > datetime.utcnow())
+    ).order_by(
+        Announcement.created_at.desc()
+    ).all()
 
     return jsonify([a.to_dict() for a in anns]), 200
 
@@ -506,7 +551,8 @@ def create_announcement():
         message=data["message"],
         tag=data.get("tag", "general"),
         gym_id=admin.gym_id,          
-        author_id=admin.id
+        author_id=admin.id,
+        expires_at=datetime.utcnow() + timedelta(days=7)
     )
 
     db.session.add(announcement)
@@ -748,6 +794,7 @@ def list_schedules():
 
 
     
+# 🔹 GET PROFILE
 @gymadmin_bp.get("/profile")
 @jwt_required()
 @role_required("gymadmin")
@@ -765,19 +812,49 @@ def get_profile():
             "name": admin.gym.name,
             "address": admin.gym.address,
             "phone": admin.gym.phone,
-            "status": admin.gym.status
         }
     }), 200
 
 
+# 🔹 UPDATE PROFILE
 @gymadmin_bp.put("/profile")
 @jwt_required()
 @role_required("gymadmin")
+@gym_required
 def update_profile():
     admin = current_admin()
     data = request.get_json() or {}
 
+    full_name = data.get("name", "").strip()
+
+    if full_name:
+        parts = full_name.split(" ", 1)
+        admin.first_name = parts[0]
+        admin.last_name = parts[1] if len(parts) > 1 else ""
+
     admin.email = data.get("email", admin.email)
+
     db.session.commit()
 
-    return jsonify({"message": "Profile updated"}), 200
+    return jsonify({"message": "Profile updated successfully"}), 200
+
+
+# 🔹 CHANGE PASSWORD
+@gymadmin_bp.put("/change-password")
+@jwt_required()
+@role_required("gymadmin")
+@gym_required
+def change_password():
+    admin = current_admin()
+    data = request.get_json() or {}
+
+    current_password = data.get("current_password")
+    new_password = data.get("new_password")
+
+    if not admin.check_password(current_password):
+        return jsonify({"error": "Current password is incorrect"}), 400
+
+    admin.set_password(new_password)
+    db.session.commit()
+
+    return jsonify({"message": "Password changed successfully"}), 200
