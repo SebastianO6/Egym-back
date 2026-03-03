@@ -15,6 +15,11 @@ class Message(db.Model):
     sender = db.relationship("User", foreign_keys=[sender_id])
     receiver = db.relationship("User", foreign_keys=[receiver_id])
 
+
+    __table_args__ = (
+        db.Index("idx_chat_lookup", "sender_id", "receiver_id", "created_at"),
+    )
+
     def to_dict(self, current_user_id):
         return {
             "id": self.id,

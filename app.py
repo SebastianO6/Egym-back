@@ -4,6 +4,7 @@ from flask import Flask
 from flask_cors import CORS
 from extensions import db, migrate, jwt, mail, socketio
 from config import Config
+from utils.scheduler import start_scheduler
 
 
 
@@ -47,5 +48,8 @@ def create_app():
 
     # ✅ Import sockets AFTER everything initialized
     from sockets import chat
+
+    with app.app_context():
+        start_scheduler(app)
 
     return app

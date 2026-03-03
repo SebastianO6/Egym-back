@@ -11,10 +11,18 @@ messages_bp = Blueprint("messages", __name__)
 def get_conversation(partner_id):
     user_id = int(get_jwt_identity())
 
-    messages = Message.query.filter(
-        ((Message.sender_id == user_id) & (Message.receiver_id == partner_id)) |
-        ((Message.sender_id == partner_id) & (Message.receiver_id == user_id))
-    ).order_by(Message.created_at.asc()).all()
+    messages = (
+        Message.query
+        .filter(
+            ((Message.sender_id == user_id) & (Message.receiver_id == partner_id)) |
+            ((Message.sender_id == partner_id) & (Message.receiver_id == user_id))
+        )
+        .order_by(Message.created_at.desc())   # newest first (fast with index)
+        .limit(200)                            # only last 200 messages
+        .all()
+    )
+
+    messages.reverse()  # restore chronological order (oldest → newest)
 
     return jsonify({
         "items": [m.to_dict(user_id) for m in messages]
