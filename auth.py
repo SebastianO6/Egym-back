@@ -135,29 +135,21 @@ def accept_invite():
     }), 200
 
 
+@auth_bp.put("/change-password")
+@jwt_required()
+def change_password():
+    user_id = int(get_jwt_identity())
+    data = request.get_json()
 
+    current_password = data.get("current_password")
+    new_password = data.get("new_password")
 
+    user = User.query.get(user_id)
 
+    if not user or not user.check_password(current_password):
+        return jsonify({"error": "Current password is incorrect"}), 400
 
+    user.set_password(new_password)
+    db.session.commit()
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    return jsonify({"message": "Password changed successfully"}), 200

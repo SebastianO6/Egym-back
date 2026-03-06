@@ -1,4 +1,4 @@
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from routes.decorators import role_required
 from models import WorkoutPlan, Payment, Subscription, Announcement, User, Message
@@ -153,3 +153,55 @@ def delete_client_message(message_id):
     db.session.commit()
 
     return jsonify({"message": "Deleted"}), 200
+
+
+@client_bp.put("/profile")
+@jwt_required()
+@role_required("client")
+def update_client_profile():
+    user_id = int(get_jwt_identity())
+    data = request.get_json()
+
+    user = User.query.get(user_id)
+
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    full_name = data.get("full_name")
+    phone = data.get("phone")
+
+    # Split full name into first + last
+    if full_name:
+        parts = full_name.strip().split(" ", 1)
+        user.first_name = parts[0]
+        user.last_name = parts[1] if len(parts) > 1 else ""
+
+    if phone:
+        user.phone = phone
+
+    db.session.commit()
+
+    return jsonify({
+        "message": "Profile updated successfully",
+        "user": user.to_dict()
+    }), 200
+
+
+@client_bp.get("/me")
+@jwt_required()
+@role_required("client")
+def get_client_profile():
+    user_id = int(get_jwt_identity())
+
+    user = User.query.get(user_id)
+
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    return jsonify({
+        "id": user.id,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "email": user.email,
+        "phone": user.phone
+    }), 200
