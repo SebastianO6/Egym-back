@@ -130,18 +130,16 @@ def list_members():
     return jsonify({"items": result}), 200
 
 
-@gymadmin_bp.get("/members/<int:id>")
+@gymadmin_bp.get("/members/<int:member_id>")
+@jwt_required()
 @role_required("gymadmin")
 @gym_required
-@jwt_required()
-
-def get_member(id):
+def get_member(member_id):
     admin = current_admin()
 
     member = User.query.filter_by(
-        id=id,
-        gym_id=admin.gym_id,
-        role="client"
+        id=member_id,
+        gym_id=admin.gym_id
     ).first_or_404()
 
     sub = Subscription.query.filter_by(
@@ -150,10 +148,30 @@ def get_member(id):
         is_active=True
     ).first()
 
-    data = member.to_dict()
-    data["subscription"] = sub.to_dict() if sub else None
+    status = "no_plan"
+    due_date = None
 
-    return jsonify(data), 200
+    if sub:
+        due_date = sub.end_date
+
+        if sub.end_date >= datetime.utcnow():
+            status = "active"
+        else:
+            status = "expired"
+
+    return {
+        "id": member.id,
+        "email": member.email,
+        "first_name": member.first_name,
+        "last_name": member.last_name,
+        "phone": member.phone,
+
+        "status": status,
+        "subscription": {
+            "plan": sub.plan if sub else None,
+            "end_date": due_date
+        }
+    }
 
 
 @gymadmin_bp.put("/members/<int:id>")
@@ -179,6 +197,14 @@ def update_member(id):
             role="trainer"
         ).first_or_404()
         member.trainer_id = trainer.id
+
+    if "name" in data:
+        parts = data["name"].split(" ", 1)
+        member.first_name = parts[0]
+        member.last_name = parts[1] if len(parts) > 1 else ""
+
+    if "phone" in data:
+        member.phone = data["phone"]    
 
     db.session.commit()
     return jsonify(member.to_dict()), 200

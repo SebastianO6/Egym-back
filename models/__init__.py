@@ -11,6 +11,8 @@ from .progress_log import ProgressLog
 from .attendance import Attendance
 from .workout_day import WorkoutDay
 from .workout_exercise import WorkoutExercise
+from .audit_log import AuditLog
+from .gym_subscription import GymSubscription
 
 
 __all__ = [
@@ -27,4 +29,6 @@ __all__ = [
     "Attendance",
     "WorkoutDay",
     "WorkoutExercise",
+    "AuditLog",
+    "GymSubscription"
 ]

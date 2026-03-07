@@ -7,6 +7,9 @@ from utils.mailer import send_gymadmin_invite_email
 import secrets
 from datetime import datetime, timedelta
 import string
+from models.audit_log import AuditLog
+from models.gym_subscription import GymSubscription
+from datetime import datetime, timedelta
 
 
 
@@ -27,6 +30,7 @@ def generate_password(length=10):
 def get_gyms():
     gyms = Gym.query.all()
     data = []
+    today = datetime.utcnow()
 
     for gym in gyms:
         members = User.query.filter_by(
@@ -35,10 +39,32 @@ def get_gyms():
             is_active=True
         ).count()
 
-        admin = User.query.filter_by(
+        admin = User.query.filter_by(   
             gym_id=gym.id,
             role="gymadmin"
         ).first()
+
+        sub = (
+            GymSubscription.query
+            .filter_by(gym_id=gym.id)
+            .order_by(GymSubscription.end_date.desc())
+            .first()
+        )
+
+        plan = None
+        end_date = None
+        days_left = None
+        status = "expired"
+        monthly_revenue = members * 300
+
+        if sub:
+            plan = sub.plan
+            end_date = sub.end_date.isoformat()
+
+            days_left = (sub.end_date - today).days
+
+            if sub.end_date >= today:
+                status = "active"
 
         data.append({
             "id": gym.id,
@@ -47,10 +73,90 @@ def get_gyms():
             "phone": gym.phone or "",
             "owner_email": admin.email if admin else None,
             "members": members,
-            "monthly_revenue_ksh": members * 300
+            "monthly_revenue_ksh": monthly_revenue,
+            "subscription_plan": plan,
+            "subscription_end": end_date,
+            "days_left": days_left,
+            "status": status
         })
 
+
     return jsonify(data), 200
+
+@superadmin_bp.get("/gyms/expiring")
+@jwt_required()
+@role_required("superadmin")
+def gyms_expiring():
+
+    today = datetime.utcnow()
+    warning_days = 3
+
+    subs = GymSubscription.query.filter_by(is_active=True).all()
+
+    result = []
+
+    for sub in subs:
+        days_left = (sub.end_date - today).days
+        if days_left < 0:
+            continue
+
+        if 0 <= days_left <= warning_days:
+
+            gym = Gym.query.get(sub.gym_id)
+
+            result.append({
+                "gym_id": gym.id,
+                "gym_name": gym.name,
+                "plan": sub.plan,
+                "days_left": days_left,
+                "end_date": sub.end_date.isoformat()
+            })
+
+    return jsonify(result)
+
+@superadmin_bp.post("/gyms/<int:gym_id>/renew")
+@jwt_required()
+@role_required("superadmin")
+def renew_gym(gym_id):
+
+    data = request.get_json() or {}
+    plan = data.get("plan")
+
+    if plan == "monthly":
+        duration = 30
+    elif plan == "yearly":
+        duration = 365
+    else:
+        return {"error": "Invalid Plan"}, 400    
+
+    old_sub = (
+        GymSubscription.query
+        .filter_by(gym_id=gym_id)
+        .order_by(GymSubscription.end_date.desc())
+        .first()
+    )
+
+    start_date = datetime.utcnow()
+
+    if old_sub and old_sub.end_date > datetime.utcnow():
+        start_date = old_sub.end_date
+
+    new_sub = GymSubscription(
+        gym_id=gym_id,
+        plan=plan,
+        start_date=start_date,
+        end_date=start_date + timedelta(days=duration),
+        is_active=True
+    )
+
+    db.session.add(new_sub)
+    db.session.commit()
+
+    return {
+        "message": "Gym subscription renewed",
+        "plan": plan,
+        "end_date": new_sub.end_date.isoformat()
+    }
 
 
 
@@ -80,6 +186,17 @@ def create_gym():
     )
     db.session.add(gym)
     db.session.flush()  # get gym.id safely
+
+            # give 14 day trial
+    trial = GymSubscription(
+        gym_id=gym.id,
+        plan="trial",
+        start_date=datetime.utcnow(),
+        end_date=datetime.utcnow() + timedelta(days=30),
+        is_active=True
+    )
+
+    db.session.add(trial)
 
     # 2️⃣ Create gymadmin (INACTIVE)
     token = secrets.token_urlsafe(32)
@@ -134,6 +251,7 @@ def platform_revenue():
         rows.append({
             "gym_id": gym.id,
             "gym_name": gym.name,
+            "location": gym.address or "Not provided",
             "members": members,
             "revenue_ksh": revenue
         })
@@ -206,7 +324,50 @@ def approve_pricing(pricing_id):
     return {"message": f"Pricing for {pricing.gym.name} approved"}, 200
 
 
+@superadmin_bp.get("/audit-logs")
+@jwt_required()
+@role_required("superadmin")
+def get_audit_logs():
 
+    logs = AuditLog.query.order_by(AuditLog.created_at.desc()).limit(100).all()
+
+    return jsonify([
+        {
+            "id": log.id,
+            "user": log.user.email if log.user else "System",
+            "action": log.action,
+            "entity": log.entity,
+            "entity_id": log.entity_id,
+            "details": log.details,
+            "created_at": log.created_at.isoformat()
+        }
+        for log in logs
+    ])
+
+
+@superadmin_bp.get("/gyms/<int:gym_id>/subscription")
+@jwt_required()
+@role_required("superadmin")
+def get_gym_subscription(gym_id):
+
+    sub = (
+        GymSubscription.query
+        .filter_by(gym_id=gym_id)
+        .order_by(GymSubscription.end_date.desc())
+        .first()
+    )
+
+    if not sub:
+        return jsonify(None), 200
+
+    today = datetime.utcnow()
+
+    return jsonify({
+        "plan": sub.plan,
+        "start_date": sub.start_date.isoformat(),
+        "end_date": sub.end_date.isoformat(),
+        "days_left": (sub.end_date - today).days
+    })
 
 
 

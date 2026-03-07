@@ -1,6 +1,7 @@
 from functools import wraps
 from flask import jsonify, request
 from flask_jwt_extended import verify_jwt_in_request, get_jwt
+from utils.helper import gym_subscription_valid
 
 
 def role_required(*allowed_roles):
@@ -33,10 +34,16 @@ def gym_required(fn):
         verify_jwt_in_request()
         claims = get_jwt()
 
-        if not claims.get("gym_id"):
+        gym_id = claims.get("gym_id")
+
+        if not gym_id:
             return jsonify({"error": "Gym context required"}), 403
 
+        if not gym_subscription_valid(gym_id):
+            return jsonify({"error": "Gym subscription expired"}), 403
+
         return fn(*args, **kwargs)
+
     return wrapper
 
 
