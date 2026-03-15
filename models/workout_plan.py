@@ -7,7 +7,7 @@ class WorkoutPlan(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(255), nullable=False)
     description = db.Column(db.Text)
-    trainer_id = db.Column(db.Integer, db.ForeignKey("users.id"))
+    trainer_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"))
     client_id = db.Column(db.Integer, db.ForeignKey("users.id"))
     gym_id = db.Column(db.Integer, db.ForeignKey("gyms.id"))
 
@@ -16,7 +16,9 @@ class WorkoutPlan(db.Model):
     workout_days = db.relationship(
         "WorkoutDay",
         backref="plan",
-        lazy=True
+        lazy=True,
+        cascade="all, delete-orphan",
+        passive_deletes=True
     )
 
     trainer = db.relationship("User", foreign_keys=[trainer_id], lazy="joined")  

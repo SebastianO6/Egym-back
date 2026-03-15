@@ -9,6 +9,7 @@ class Gym(db.Model):
     name = db.Column(db.String(120), unique=True, nullable=False)
     phone = db.Column(db.String(30))
     address = db.Column(db.String(255))
+    status = db.Column(db.String(20), default="active")
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     users = db.relationship(

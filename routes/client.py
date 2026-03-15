@@ -205,3 +205,22 @@ def get_client_profile():
         "email": user.email,
         "phone": user.phone
     }), 200
+
+@client_bp.get("/trainer")
+@jwt_required()
+@role_required("client")
+def get_my_trainer():
+    client_id = get_jwt_identity()
+
+    client = User.query.get_or_404(client_id)
+
+    if not client.trainer_id:
+        return jsonify({"trainer": None})
+
+    trainer = User.query.get(client.trainer_id)
+
+    return jsonify({
+        "trainer_id": trainer.id,
+        "trainer_name": trainer.full_name,
+        "trainer_email": trainer.email
+    })

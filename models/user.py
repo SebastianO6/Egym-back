@@ -22,11 +22,19 @@ class User(db.Model):
         db.ForeignKey("gyms.id", ondelete="CASCADE"),
         nullable=True
     )
+    
+    schedules = db.relationship(
+        "Schedule",
+        foreign_keys="Schedule.client_id",
+        back_populates="client",
+        cascade="all, delete",
+        passive_deletes=True
+    )
 
     # Client → Trainer self reference
     trainer_id = db.Column(
         db.Integer,
-        db.ForeignKey("users.id"),
+        db.ForeignKey("users.id",ondelete="SET NULL"),
         nullable=True
     )
 
@@ -75,6 +83,10 @@ class User(db.Model):
         if not self.password_hash:
             return False
         return check_password_hash(self.password_hash, password)
+    
+    @property
+    def status(self):
+        return "active" if self.is_active else "expired"
 
     def to_dict(self):
         return {
@@ -89,6 +101,7 @@ class User(db.Model):
             "goal": self.goal,
             "gym_id": self.gym_id,
             "trainer_id": self.trainer_id,
+            "status": self.status,
             "created_at": self.created_at.isoformat()
         }
 

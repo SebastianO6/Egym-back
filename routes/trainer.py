@@ -105,7 +105,7 @@ def member_details(member_id):
         "id": member.id,
         "full_name": member.full_name,
         "email": member.email,
-        "phone": member.phone,
+        "phone": member.phone or "",
         "age": member.age,
         "goal": member.goal,
         "notes": member.trainer_notes,
@@ -243,13 +243,10 @@ def clients():
 @role_required("trainer")
 def list_trainer_plans():
     trainer_id = int(get_jwt_identity())
-
-    plans = WorkoutPlan.query.filter_by(
-        trainer_id=trainer_id
-    ).all()
+    plans = WorkoutPlan.query.filter_by(trainer_id=trainer_id).all()
 
     return jsonify({
-        "items": [p.to_dict() for p in plans]
+        "items": [p.to_dict() for p in plans]  # includes client_name
     })
 
 
@@ -522,5 +519,55 @@ def member_overview(member_id):
         "active_plan": plan.to_dict() if plan else None
     })
 
+
+@trainer_bp.get("/profile")
+@jwt_required()
+@role_required("trainer")
+def get_trainer_profile():
+    trainer_id = get_jwt_identity()
+    trainer = User.query.get_or_404(trainer_id)
+    return jsonify({
+        "id": trainer.id,
+        "full_name": trainer.full_name,
+        "email": trainer.email,
+        "phone": trainer.phone
+    })
+
+
+@trainer_bp.put("/profile")
+@jwt_required()
+@role_required("trainer")
+def update_trainer_profile():
+    trainer_id = get_jwt_identity()
+    data = request.json
+    trainer = User.query.get_or_404(trainer_id)
+
+    trainer.first_name = data.get("first_name", trainer.first_name)
+    trainer.last_name = data.get("last_name", trainer.last_name)
+    trainer.email = data.get("email", trainer.email)
+    trainer.phone = data.get("phone", trainer.phone)
+
+    db.session.commit()
+    return jsonify({"message": "Profile updated successfully"}), 200
+
+
+@trainer_bp.put("/change-password")
+@jwt_required()
+@role_required("trainer")
+def change_trainer_password():
+    trainer_id = get_jwt_identity()
+    data = request.json
+    trainer = User.query.get_or_404(trainer_id)
+
+    current_password = data.get("current_password")
+    new_password = data.get("new_password")
+
+    if not trainer.check_password(current_password):
+        return jsonify({"error": "Incorrect current password"}), 400
+
+    trainer.set_password(new_password)
+    db.session.commit()
+
+    return jsonify({"message": "Password changed successfully"}), 200
 
 

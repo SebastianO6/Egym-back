@@ -8,6 +8,7 @@ from flask_jwt_extended import (
 from datetime import timedelta, datetime
 from extensions import db
 from models.user import User
+from models.gym_subscription import GymSubscription
 from routes.decorators import password_change_only, block_temp_tokens
 from werkzeug.security import generate_password_hash
 
@@ -33,6 +34,17 @@ def login():
     if not user.check_password(password):
         return jsonify({"msg": "Invalid credentials"}), 401
 
+    # ✅ BLOCK INACTIVE USERS
+    if not user.is_active:
+        return jsonify({
+            "msg": "Account inactive. Contact gym administration."
+        }), 403
+    
+    if user.gym and user.gym.status != "active":
+        return jsonify({
+            "msg": "Gym subscription inactive. Contact platform support."
+        }), 403
+
     access_token = create_access_token(
         identity=str(user.id),
         additional_claims={
@@ -54,9 +66,32 @@ def login():
 @jwt_required()
 @block_temp_tokens
 def me():
-    user = User.query.get(int(get_jwt_identity()))
+
+    user = db.session.get(User, int(get_jwt_identity()))
+
     if not user:
         return jsonify({"error": "User not found"}), 404
+
+    # 🚨 User manually disabled
+    if not user.is_active:
+        return jsonify({"error": "Account inactive"}), 403
+
+    # 🚨 Gym manually disabled
+    if user.gym and user.gym.status != "active":
+        return jsonify({"error": "Gym inactive"}), 403
+
+    # 🚨 Check subscription expiry
+    if user.gym:
+        sub = (
+            GymSubscription.query
+            .filter_by(gym_id=user.gym_id)
+            .order_by(GymSubscription.end_date.desc())
+            .first()
+        )
+
+        if not sub or sub.end_date < datetime.utcnow():
+            return jsonify({"error": "Gym subscription expired"}), 403
+
     return jsonify(user.to_dict()), 200
 
 

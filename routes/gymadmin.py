@@ -16,6 +16,11 @@ from utils.auth import current_admin
 from utils.mailer import send_gymadmin_invite_email
 from models.gym_pricing import GymPricing
 from models.schedule import Schedule
+from models.message import Message
+from models.workout_plan import WorkoutPlan
+from models.workout_plan import WorkoutPlan
+from sqlalchemy.orm import aliased 
+from sqlalchemy import or_, and_
 
 gymadmin_bp = Blueprint("gymadmin", __name__)
 
@@ -223,7 +228,10 @@ def delete_member(id):
         role="client"
     ).first_or_404()
 
-    # 🔥 DELETE DEPENDENCIES FIRST
+    # DELETE schedules referencing this member
+    Schedule.query.filter_by(client_id=member.id).delete()
+
+    # existing deletes
     Subscription.query.filter_by(
         user_id=member.id,
         gym_id=admin.gym_id
@@ -269,6 +277,9 @@ def invite_member():
         email=email,
         role="client",
         gym_id=admin.gym_id,
+        first_name=data.get("first_name"),
+        last_name=data.get("last_name"),
+        phone=data.get("phone"),
         is_active=False,
         invite_token=token,
         invite_expires_at=datetime.utcnow() + timedelta(hours=24),
@@ -358,7 +369,9 @@ def update_trainer(id):
 @gymadmin_bp.delete("/trainers/<int:id>")
 @jwt_required()
 @role_required("gymadmin")
+@gym_required
 def delete_trainer(id):
+
     admin = current_admin()
 
     trainer = User.query.filter_by(
@@ -371,7 +384,6 @@ def delete_trainer(id):
     db.session.commit()
 
     return jsonify({"message": "Trainer deleted"}), 200
-
 
 @gymadmin_bp.post("/trainers/invite")
 @role_required("gymadmin")
@@ -496,6 +508,10 @@ def renew_member(member_id):
         method="cash",
         status="paid"
     )
+
+    user = User.query.get(member_id)
+
+    user.is_active = True
 
     db.session.add_all([sub, payment])
     db.session.commit()
@@ -884,3 +900,104 @@ def change_password():
     db.session.commit()
 
     return jsonify({"message": "Password changed successfully"}), 200
+
+
+@gymadmin_bp.get("/members/expired")
+@jwt_required()
+@role_required("gymadmin")
+@gym_required
+def get_expired_members():
+
+    gym_id = get_jwt()["gym_id"]
+    now = datetime.utcnow()
+
+    expired = (
+        db.session.query(User, Subscription)
+        .join(Subscription, Subscription.user_id == User.id)
+        .filter(
+            User.gym_id == gym_id,
+            User.role == "client",
+            Subscription.is_active == False
+        )
+        .order_by(Subscription.end_date.desc())
+        .all()
+    )
+
+    seen = set()
+    data = []
+
+    for user, sub in expired:
+        if user.id in seen:
+            continue
+
+        seen.add(user.id)
+
+        data.append({
+            "id": user.id,
+            "email": user.email,
+            "name": user.full_name,
+            "plan": sub.plan,
+            "expired_on": sub.end_date
+        })
+
+    return jsonify({"items": data}), 200
+
+
+@gymadmin_bp.patch("/members/<int:member_id>/deactivate")
+@role_required("gymadmin")
+@gym_required
+@jwt_required()
+def deactivate_member(member_id):
+    admin = current_admin()
+
+    member = User.query.filter_by(
+        id=member_id,
+        gym_id=admin.gym_id,
+        role="client"
+    ).first_or_404()
+
+    sub = (
+        Subscription.query
+        .filter_by(user_id=member.id, gym_id=admin.gym_id)
+        .order_by(Subscription.end_date.desc())
+        .first()
+    )
+
+    if sub:
+        sub.is_active = False
+        sub.end_date = sub.end_date or datetime.utcnow()
+        member.is_active = False
+        db.session.commit()
+
+    return jsonify({"message": "Member deactivated"}), 200
+
+
+@gymadmin_bp.patch("/members/<int:member_id>/activate")
+@role_required("gymadmin")
+@gym_required
+@jwt_required()
+def activate_member(member_id):
+    admin = current_admin()
+
+    member = User.query.filter_by(
+        id=member_id,
+        gym_id=admin.gym_id,
+        role="client"
+    ).first_or_404()
+
+    sub = (
+        Subscription.query
+        .filter_by(user_id=member.id, gym_id=admin.gym_id)
+        .order_by(Subscription.end_date.desc())
+        .first()
+    )
+
+    if sub:
+        sub.is_active = True
+        if not sub.end_date or sub.end_date < datetime.utcnow():
+            sub.end_date = datetime.utcnow() + timedelta(days=30)  # default 30 days
+
+        member.is_active = True
+        db.session.commit()
+
+    return jsonify({"message": "Member activated"}), 200

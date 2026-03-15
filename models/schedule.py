@@ -11,13 +11,13 @@ class Schedule(db.Model):
 
     trainer_id = db.Column(
         db.Integer,
-        db.ForeignKey("users.id"),
+        db.ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False
     )
 
     client_id = db.Column(
         db.Integer,
-        db.ForeignKey("users.id"),
+        db.ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False
     )
 
@@ -38,6 +38,7 @@ class Schedule(db.Model):
     client = db.relationship(
         "User",
         foreign_keys=[client_id],
+        back_populates="schedules",
         lazy="joined"
     )
 

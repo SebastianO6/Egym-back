@@ -39,7 +39,7 @@ def get_gyms():
             is_active=True
         ).count()
 
-        admin = User.query.filter_by(   
+        admin = User.query.filter_by(
             gym_id=gym.id,
             role="gymadmin"
         ).first()
@@ -54,17 +54,17 @@ def get_gyms():
         plan = None
         end_date = None
         days_left = None
-        status = "expired"
-        monthly_revenue = members * 300
+        subscription_status = "expired"
 
         if sub:
             plan = sub.plan
             end_date = sub.end_date.isoformat()
-
             days_left = (sub.end_date - today).days
 
             if sub.end_date >= today:
-                status = "active"
+                subscription_status = "active"
+
+        monthly_revenue = members * 300
 
         data.append({
             "id": gym.id,
@@ -74,12 +74,16 @@ def get_gyms():
             "owner_email": admin.email if admin else None,
             "members": members,
             "monthly_revenue_ksh": monthly_revenue,
+
+            # subscription info
             "subscription_plan": plan,
             "subscription_end": end_date,
             "days_left": days_left,
-            "status": status
-        })
+            "subscription_status": subscription_status,
 
+            # real gym status
+            "status": gym.status
+        })
 
     return jsonify(data), 200
 
@@ -226,6 +230,31 @@ def create_gym():
     }, 201
 
 
+@superadmin_bp.put("/gyms/<int:gym_id>")
+@jwt_required()
+@role_required("superadmin")
+def update_gym(gym_id):
+
+    gym = Gym.query.get_or_404(gym_id)
+
+    data = request.get_json() or {}
+
+    gym.name = data.get("name", gym.name)
+    gym.phone = data.get("phone", gym.phone)
+    gym.address = data.get("address", gym.address)
+    gym.status = data.get("status", gym.status)
+
+    db.session.commit()
+
+    return jsonify({
+        "id": gym.id,
+        "name": gym.name,
+        "phone": gym.phone,
+        "address": gym.address,
+        "status": gym.status
+    }), 200
+
+
 
 
 # ---------------- REVENUE ----------------
@@ -368,6 +397,48 @@ def get_gym_subscription(gym_id):
         "end_date": sub.end_date.isoformat(),
         "days_left": (sub.end_date - today).days
     })
+
+
+@superadmin_bp.patch("/gyms/<int:gym_id>/deactivate")
+@jwt_required()
+@role_required("superadmin")
+def deactivate_gym(gym_id):
+
+    gym = Gym.query.get_or_404(gym_id)
+
+    gym.status = "inactive"
+
+    # deactivate all users
+    users = User.query.filter_by(gym_id=gym.id).all()
+
+    for user in users:
+        user.is_active = False
+
+    db.session.commit()
+
+    return {
+        "message": "Gym deactivated"
+    }, 200
+
+@superadmin_bp.patch("/gyms/<int:gym_id>/activate")
+@jwt_required()
+@role_required("superadmin")
+def activate_gym(gym_id):
+
+    gym = Gym.query.get_or_404(gym_id)
+
+    gym.status = "active"
+
+    users = User.query.filter_by(gym_id=gym.id).all()
+
+    for user in users:
+        user.is_active = True
+
+    db.session.commit()
+
+    return {
+        "message": "Gym activated"
+    }, 200
 
 
 
