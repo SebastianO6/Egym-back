@@ -1,17 +1,30 @@
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, current_app
 from flask_jwt_extended import jwt_required
 from extensions import db
-from models import Gym, User, GymPricing
+from models import (
+    Announcement,
+    Attendance,
+    AuditLog,
+    Gym,
+    GymPricing,
+    GymSubscription,
+    Message,
+    Payment,
+    ProgressLog,
+    Schedule,
+    Subscription,
+    User,
+    WorkoutDay,
+    WorkoutExercise,
+    WorkoutPlan,
+)
 from routes.decorators import role_required
 from utils.mailer import send_gymadmin_invite_email
 import secrets
 from datetime import datetime, timedelta
 import string
-from models.audit_log import AuditLog
-from models.gym_subscription import GymSubscription
-from datetime import datetime, timedelta
-
-
+import re
+from sqlalchemy import delete, or_, select, update
 
 superadmin_bp = Blueprint(
     "superadmin",
@@ -69,6 +82,8 @@ def get_gyms():
         data.append({
             "id": gym.id,
             "name": gym.name,
+            "slug": gym.slug,
+            "join_url": build_join_url(gym.slug) if gym.slug else None,
             "address": gym.address or "",
             "phone": gym.phone or "",
             "owner_email": admin.email if admin else None,
@@ -164,6 +179,30 @@ def renew_gym(gym_id):
 
 
 
+
+# -----------------------------
+# 🔥 SLUG GENERATOR
+# -----------------------------
+def generate_unique_slug(name):
+    base_slug = re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')
+    slug = base_slug
+    count = 1
+
+    while Gym.query.filter_by(slug=slug).first():
+        slug = f"{base_slug}-{count}"
+        count += 1
+
+    return slug
+
+
+def build_join_url(slug):
+    frontend_url = current_app.config.get("FRONTEND_URL", "http://localhost:3000").rstrip("/")
+    return f"{frontend_url}/join/{slug}"
+
+
+# -----------------------------
+# ✅ CREATE GYM
+# -----------------------------
 @superadmin_bp.post("/gyms")
 @jwt_required()
 @role_required("superadmin")
@@ -176,22 +215,28 @@ def create_gym():
     if not name or not owner_email:
         return {"error": "Gym name and owner email required"}, 400
 
+    # Prevent duplicates
     if Gym.query.filter_by(name=name).first():
         return {"error": "Gym already exists"}, 409
 
     if User.query.filter_by(email=owner_email).first():
         return {"error": "Email already in use"}, 409
 
+    # 🔥 Generate slug automatically
+    slug = generate_unique_slug(name)
+
     # 1️⃣ Create gym
     gym = Gym(
         name=name,
+        slug=slug,
         phone=data.get("phone"),
-        address=data.get("address")
+        address=data.get("address"),
+        status="active"
     )
     db.session.add(gym)
-    db.session.flush()  # get gym.id safely
+    db.session.flush()  # ensures gym.id is available
 
-            # give 14 day trial
+    # 2️⃣ Create trial subscription
     trial = GymSubscription(
         gym_id=gym.id,
         plan="trial",
@@ -199,10 +244,9 @@ def create_gym():
         end_date=datetime.utcnow() + timedelta(days=30),
         is_active=True
     )
-
     db.session.add(trial)
 
-    # 2️⃣ Create gymadmin (INACTIVE)
+    # 3️⃣ Create gym admin (inactive + invite)
     token = secrets.token_urlsafe(32)
 
     admin = User(
@@ -214,32 +258,49 @@ def create_gym():
         invite_token=token,
         invite_expires_at=datetime.utcnow() + timedelta(hours=24)
     )
-
     db.session.add(admin)
+
     db.session.commit()
 
-    # 3️⃣ Send invite email
+    # 4️⃣ Send invite email
     send_gymadmin_invite_email(
         email=admin.email,
         gym_name=gym.name,
         token=token
     )
 
-    return {
-        "message": "Gym created. Invite sent to gym admin."
-    }, 201
+    return jsonify({
+        "message": "Gym created. Invite sent to gym admin.",
+        "gym": {
+            "id": gym.id,
+            "name": gym.name,
+            "slug": gym.slug,
+            "join_url": build_join_url(gym.slug),
+            "status": gym.status
+        },
+        "admin_email": admin.email
+    }), 201
 
 
+# -----------------------------
+# ✅ UPDATE GYM
+# -----------------------------
 @superadmin_bp.put("/gyms/<int:gym_id>")
 @jwt_required()
 @role_required("superadmin")
 def update_gym(gym_id):
 
     gym = Gym.query.get_or_404(gym_id)
-
     data = request.get_json() or {}
 
-    gym.name = data.get("name", gym.name)
+    # 🔥 Handle name + slug update
+    new_name = data.get("name")
+
+    if new_name and new_name != gym.name:
+        gym.name = new_name
+        gym.slug = generate_unique_slug(new_name)
+
+    # Other updates (unchanged)
     gym.phone = data.get("phone", gym.phone)
     gym.address = data.get("address", gym.address)
     gym.status = data.get("status", gym.status)
@@ -249,6 +310,8 @@ def update_gym(gym_id):
     return jsonify({
         "id": gym.id,
         "name": gym.name,
+        "slug": gym.slug,
+        "join_url": build_join_url(gym.slug) if gym.slug else None,
         "phone": gym.phone,
         "address": gym.address,
         "status": gym.status
@@ -319,11 +382,121 @@ def get_all_users():
 @role_required("superadmin")
 def delete_gym(gym_id):
     gym = Gym.query.get_or_404(gym_id)
-    db.session.delete(gym)
-    db.session.commit()
-    return jsonify({"message": "Gym deleted"}), 200
+    user_ids = db.session.execute(
+        select(User.id).where(User.gym_id == gym.id)
+    ).scalars().all()
 
-# Get all pending gym pricing
+    try:
+        if user_ids:
+            db.session.execute(
+                delete(Announcement).where(
+                    or_(
+                        Announcement.gym_id == gym.id,
+                        Announcement.author_id.in_(user_ids)
+                    )
+                )
+            )
+            db.session.execute(
+                delete(Attendance).where(
+                    or_(
+                        Attendance.client_id.in_(user_ids),
+                        Attendance.trainer_id.in_(user_ids)
+                    )
+                )
+            )
+            db.session.execute(
+                delete(Message).where(
+                    or_(
+                        Message.sender_id.in_(user_ids),
+                        Message.receiver_id.in_(user_ids)
+                    )
+                )
+            )
+            db.session.execute(
+                delete(Payment).where(
+                    or_(
+                        Payment.gym_id == gym.id,
+                        Payment.user_id.in_(user_ids)
+                    )
+                )
+            )
+            db.session.execute(
+                delete(ProgressLog).where(
+                    or_(
+                        ProgressLog.client_id.in_(user_ids),
+                        ProgressLog.trainer_id.in_(user_ids)
+                    )
+                )
+            )
+            db.session.execute(
+                delete(Schedule).where(
+                    or_(
+                        Schedule.gym_id == gym.id,
+                        Schedule.client_id.in_(user_ids),
+                        Schedule.trainer_id.in_(user_ids)
+                    )
+                )
+            )
+            db.session.execute(
+                delete(Subscription).where(
+                    or_(
+                        Subscription.gym_id == gym.id,
+                        Subscription.user_id.in_(user_ids)
+                    )
+                )
+            )
+            db.session.execute(
+                update(AuditLog)
+                .where(AuditLog.user_id.in_(user_ids))
+                .values(user_id=None)
+            )
+
+            plan_ids = db.session.execute(
+                select(WorkoutPlan.id).where(
+                    or_(
+                        WorkoutPlan.gym_id == gym.id,
+                        WorkoutPlan.client_id.in_(user_ids),
+                        WorkoutPlan.trainer_id.in_(user_ids)
+                    )
+                )
+            ).scalars().all()
+
+            if plan_ids:
+                day_ids = db.session.execute(
+                    select(WorkoutDay.id).where(WorkoutDay.plan_id.in_(plan_ids))
+                ).scalars().all()
+
+                if day_ids:
+                    db.session.execute(
+                        delete(WorkoutExercise).where(
+                            WorkoutExercise.day_id.in_(day_ids)
+                        )
+                    )
+
+                db.session.execute(
+                    delete(WorkoutDay).where(WorkoutDay.plan_id.in_(plan_ids))
+                )
+                db.session.execute(
+                    delete(WorkoutPlan).where(WorkoutPlan.id.in_(plan_ids))
+                )
+
+            db.session.execute(delete(User).where(User.id.in_(user_ids)))
+
+        db.session.execute(delete(GymPricing).where(GymPricing.gym_id == gym.id))
+        db.session.execute(
+            delete(GymSubscription).where(GymSubscription.gym_id == gym.id)
+        )
+        db.session.execute(delete(Gym).where(Gym.id == gym.id))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception("Failed to delete gym %s", gym_id)
+        return jsonify({"error": "Failed to delete gym"}), 500
+
+    return jsonify({"message": "Gym deleted permanently"}), 200
+
+
+
 @superadmin_bp.get("/pricing/pending")
 @jwt_required()
 @role_required("superadmin")

@@ -8,7 +8,7 @@ class GymPricing(db.Model):
 
     gym_id = db.Column(
         db.Integer,
-        db.ForeignKey("gyms.id"),
+        db.ForeignKey("gyms.id",ondelete="CASCADE"),
         unique=True,
         nullable=False
     )
@@ -19,4 +19,7 @@ class GymPricing(db.Model):
     approved = db.Column(db.Boolean, default=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    gym = db.relationship("Gym", backref = "pricing", lazy =True)
+    gym = db.relationship(
+        "Gym",
+        back_populates="pricing"
+    )

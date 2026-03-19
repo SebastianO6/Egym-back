@@ -9,6 +9,7 @@ from utils.scheduler import start_scheduler
 
 
 def create_app():
+    load_dotenv()
     app = Flask(__name__)
     app.config.from_object(Config)
 
@@ -22,12 +23,11 @@ def create_app():
         methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
     )
 
-    db.init_app(app)    
+    db.init_app(app)
+    import models  # noqa: F401
     migrate.init_app(app, db)
     jwt.init_app(app)
     socketio.init_app(app)  # ✅ IMPORTANT
-    load_dotenv()
-
     from auth import auth_bp
     from routes.superadmin import superadmin_bp
     from routes.gymadmin import gymadmin_bp

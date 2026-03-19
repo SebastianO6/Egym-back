@@ -7,7 +7,7 @@ class GymSubscription(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
 
-    gym_id = db.Column(db.Integer, db.ForeignKey("gyms.id"), nullable=False)
+    gym_id = db.Column(db.Integer, db.ForeignKey("gyms.id", ondelete = "CASCADE"), nullable=False)
 
     plan = db.Column(db.String(20))
     start_date = db.Column(db.DateTime, default=datetime.utcnow)

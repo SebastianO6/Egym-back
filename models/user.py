@@ -50,6 +50,12 @@ class User(db.Model):
         "Gym",
         back_populates="users"
     )
+    
+    payments = db.relationship(
+        "Payment",
+        cascade="all, delete-orphan",
+        passive_deletes=True
+    )
 
 
     # -------- Profile --------

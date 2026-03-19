@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import (
     create_access_token,
     create_refresh_token,
@@ -11,9 +11,15 @@ from models.user import User
 from models.gym_subscription import GymSubscription
 from routes.decorators import password_change_only, block_temp_tokens
 from werkzeug.security import generate_password_hash
+from models.gym import Gym
+import secrets
 
 
 auth_bp = Blueprint("auth", __name__)  # ✅ NO url_prefix here
+
+def build_join_url(slug):
+    frontend_url = current_app.config.get("FRONTEND_URL", "http://localhost:3000").rstrip("/")
+    return f"{frontend_url}/join/{slug}"
 
 
 @auth_bp.post("/login")
@@ -24,25 +30,25 @@ def login():
     password = data.get("password")
 
     if not email or not password:
-        return jsonify({"msg": "Email and password required"}), 400
+        return jsonify({"message": "Email and password required"}), 400
 
     user = User.query.filter_by(email=email).first()
 
     if not user:
-        return jsonify({"msg": "Invalid credentials"}), 401
+        return jsonify({"message": "Invalid credentials"}), 401
 
     if not user.check_password(password):
-        return jsonify({"msg": "Invalid credentials"}), 401
+        return jsonify({"message": "Invalid credentials"}), 401
 
     # ✅ BLOCK INACTIVE USERS
     if not user.is_active:
         return jsonify({
-            "msg": "Account inactive. Contact gym administration."
+            "message": "Account inactive. Contact gym administration."
         }), 403
     
     if user.gym and user.gym.status != "active":
         return jsonify({
-            "msg": "Gym subscription inactive. Contact platform support."
+            "message": "Gym subscription inactive. Contact platform support."
         }), 403
 
     access_token = create_access_token(
@@ -188,3 +194,62 @@ def change_password():
     db.session.commit()
 
     return jsonify({"message": "Password changed successfully"}), 200
+
+
+@auth_bp.post("/register")
+def register():
+
+    data = request.get_json()
+
+    gym_slug = data.get("gym_slug")
+    email = data.get("email")
+
+    gym = Gym.query.filter_by(slug=gym_slug).first()
+
+    if not gym:
+        return jsonify({"error": "Invalid gym"}), 404
+
+    if gym.status != "active":
+        return jsonify({"error": "Gym is not accepting registrations"}), 403
+
+    if User.query.filter_by(email=email).first():
+        return jsonify({"error": "User already exists"}), 400
+
+    token = secrets.token_urlsafe(32)
+
+    user = User(
+        first_name=data.get("first_name"),
+        last_name=data.get("last_name"),
+        email=email,
+        role="client",
+        gym_id=gym.id,
+        invite_token=token,
+        invite_expires_at=datetime.utcnow() + timedelta(hours=24),
+        is_active=False
+    )
+
+    db.session.add(user)
+    db.session.commit()
+
+    return jsonify({
+        "activation_token": token
+    }), 201
+
+
+@auth_bp.get("/gyms/<string:gym_slug>")
+def get_gym_by_slug(gym_slug):
+    gym = Gym.query.filter_by(slug=gym_slug).first()
+
+    if not gym:
+        return jsonify({"error": "Invalid gym"}), 404
+
+    if gym.status != "active":
+        return jsonify({"error": "Gym is not accepting registrations"}), 403
+
+    return jsonify({
+        "id": gym.id,
+        "name": gym.name,
+        "slug": gym.slug,
+        "status": gym.status,
+        "join_url": build_join_url(gym.slug),
+    }), 200
