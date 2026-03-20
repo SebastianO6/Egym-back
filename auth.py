@@ -12,6 +12,7 @@ from models.gym_subscription import GymSubscription
 from routes.decorators import password_change_only, block_temp_tokens
 from werkzeug.security import generate_password_hash
 from models.gym import Gym
+from utils.audit import log_action
 import secrets
 
 
@@ -221,6 +222,7 @@ def register():
         first_name=data.get("first_name"),
         last_name=data.get("last_name"),
         email=email,
+        phone=data.get("phone"),
         role="client",
         gym_id=gym.id,
         invite_token=token,
@@ -230,6 +232,17 @@ def register():
 
     db.session.add(user)
     db.session.commit()
+    log_action(
+        action="member_self_registered",
+        entity="user",
+        entity_id=user.id,
+        details={
+            "email": user.email,
+            "gym_id": gym.id,
+            "gym_slug": gym.slug,
+        },
+        commit=True,
+    )
 
     return jsonify({
         "activation_token": token

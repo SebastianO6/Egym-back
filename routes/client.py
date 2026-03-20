@@ -1,7 +1,7 @@
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from routes.decorators import role_required
-from models import WorkoutPlan, Payment, Subscription, Announcement, User, Message
+from models import WorkoutPlan, Payment, Schedule, Subscription, Announcement, User, Message
 from datetime import datetime
 from extensions import db
 client_bp = Blueprint("client", __name__)
@@ -13,11 +13,24 @@ client_bp = Blueprint("client", __name__)
 def get_my_plans():
     user_id = int(get_jwt_identity())
 
-    plans = WorkoutPlan.query.filter_by(client_id=user_id).all()
+    plans = (
+        WorkoutPlan.query
+        .join(Schedule, Schedule.plan_id == WorkoutPlan.id)
+        .filter(
+            WorkoutPlan.client_id == user_id,
+            Schedule.status != "completed",
+        )
+        .order_by(Schedule.start_time.desc(), WorkoutPlan.id.desc())
+        .all()
+    )
 
     result = []
+    seen_plan_ids = set()
 
     for p in plans:
+        if p.id in seen_plan_ids:
+            continue
+        seen_plan_ids.add(p.id)
         days = []
 
         for day in p.workout_days:
@@ -100,9 +113,16 @@ def my_subscription():
 def client_announcements():
     user = User.query.get(get_jwt_identity())
 
-    announcements = Announcement.query.filter_by(
-        gym_id=user.gym_id
-    ).order_by(Announcement.created_at.desc()).all()
+    announcements = (
+        Announcement.query
+        .filter(
+            Announcement.gym_id == user.gym_id,
+            (Announcement.expires_at.is_(None)) |
+            (Announcement.expires_at > datetime.utcnow())
+        )
+        .order_by(Announcement.created_at.desc())
+        .all()
+    )
 
     return jsonify([
         {

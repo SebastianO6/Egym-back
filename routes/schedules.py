@@ -76,20 +76,18 @@ def client_schedule():
     client_id = int(get_jwt_identity())
     gym_id = get_jwt().get("gym_id")
 
-    sessions = Schedule.query.filter_by(
-        client_id=client_id,
-        gym_id=gym_id
-    ).order_by(Schedule.start_time.asc()).all()
+    sessions = (
+        Schedule.query
+        .filter(
+            Schedule.client_id == client_id,
+            Schedule.gym_id == gym_id,
+            Schedule.status != "completed",
+        )
+        .order_by(Schedule.start_time.asc())
+        .all()
+    )
 
-    return jsonify([
-        {
-            "id": s.id,
-            "start": s.start_time.isoformat(),
-            "end": s.end_time.isoformat(),
-            "status": s.status
-        }
-        for s in sessions
-    ])
+    return jsonify([s.to_dict() for s in sessions])
 
 
 

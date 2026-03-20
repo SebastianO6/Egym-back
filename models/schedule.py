@@ -48,11 +48,15 @@ class Schedule(db.Model):
         return {
             "id": self.id,
             "trainer_id": self.trainer_id,
+            "trainer_name": self.trainer.full_name if self.trainer else None,
             "client_id": self.client_id,
             "member_name": self.client.full_name if self.client else None,
             "workout_date": self.start_time.date().isoformat(),
             "start_time": self.start_time.strftime("%H:%M"),
             "end_time": self.end_time.strftime("%H:%M"),
             "plan_id": self.plan_id,
+            "plan_title": self.plan.title if self.plan else None,
+            "start": self.start_time.isoformat(),
+            "end": self.end_time.isoformat(),
             "status": self.status
         }

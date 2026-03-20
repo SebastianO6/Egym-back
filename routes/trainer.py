@@ -4,6 +4,7 @@ from routes.decorators import role_required, block_temp_tokens
 from extensions import db
 from models import User, WorkoutPlan, Payment, ProgressLog, Attendance, Message, Subscription, WorkoutExercise, WorkoutDay, Schedule
 from datetime import datetime, timedelta
+from utils.audit import log_action
 
 
 trainer_bp = Blueprint("trainer", __name__, url_prefix="/api/trainer")
@@ -170,6 +171,13 @@ def add_progress(member_id):
     )
 
     db.session.add(log)
+    log_action(
+        "add_progress",
+        entity="progress_log",
+        entity_id=member_id,
+        details={"member_id": member_id, "weight": data.get("weight")},
+        session=db.session,
+    )
     db.session.commit()
 
     return {"message": "Progress added"}, 201
@@ -320,6 +328,13 @@ def create_plan():
     )
 
     db.session.add(first_session)
+    log_action(
+        "create_workout_plan",
+        entity="workout_plan",
+        entity_id=plan.id,
+        details={"client_id": client.id, "title": plan.title},
+        session=db.session,
+    )
     db.session.commit()
 
     return jsonify({
@@ -383,6 +398,8 @@ def delete_plan(plan_id):
         trainer_id=trainer_id
     ).first_or_404()
 
+    Schedule.query.filter_by(plan_id=plan.id).delete(synchronize_session=False)
+
     WorkoutExercise.query.filter(
         WorkoutExercise.day_id.in_(
             db.session.query(WorkoutDay.id).filter_by(plan_id=plan.id)
@@ -390,6 +407,13 @@ def delete_plan(plan_id):
     ).delete(synchronize_session=False)
 
     WorkoutDay.query.filter_by(plan_id=plan.id).delete()
+    log_action(
+        "delete_workout_plan",
+        entity="workout_plan",
+        entity_id=plan.id,
+        details={"client_id": plan.client_id, "title": plan.title},
+        session=db.session,
+    )
     db.session.delete(plan)
     db.session.commit()
 
@@ -482,9 +506,15 @@ def delete_message(message_id):
 def trainer_schedule():
     trainer_id = int(get_jwt_identity())
 
-    schedules = Schedule.query.filter_by(
-        trainer_id=trainer_id
-    ).order_by(Schedule.start_time.asc()).all()
+    schedules = (
+        Schedule.query
+        .filter(
+            Schedule.trainer_id == trainer_id,
+            Schedule.status != "completed"
+        )
+        .order_by(Schedule.start_time.asc())
+        .all()
+    )
 
     return jsonify({
         "items": [s.to_dict() for s in schedules]

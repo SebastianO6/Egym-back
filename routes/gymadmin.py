@@ -13,7 +13,9 @@ from models.payment import Payment
 
 from routes.decorators import role_required, gym_required
 from utils.auth import current_admin
+from utils.audit import log_action
 from utils.mailer import send_gymadmin_invite_email
+from utils.pricing import calculate_gym_pricing, get_active_member_count
 from models.gym_pricing import GymPricing
 from models.schedule import Schedule
 from models.message import Message
@@ -170,6 +172,8 @@ def get_member(member_id):
         "first_name": member.first_name,
         "last_name": member.last_name,
         "phone": member.phone,
+        "trainer_id": member.trainer_id,
+        "trainer_name": member.trainer.full_name if member.trainer else None,
 
         "status": status,
         "subscription": {
@@ -194,23 +198,46 @@ def update_member(id):
         role="client"
     ).first_or_404()
 
-    # Trainer change
     if "trainer_id" in data:
-        trainer = User.query.filter_by(
-            id=data["trainer_id"],
-            gym_id=admin.gym_id,
-            role="trainer"
-        ).first_or_404()
-        member.trainer_id = trainer.id
+        if data["trainer_id"] in (None, "", 0):
+            member.trainer_id = None
+        else:
+            trainer = User.query.filter_by(
+                id=data["trainer_id"],
+                gym_id=admin.gym_id,
+                role="trainer"
+            ).first_or_404()
+            member.trainer_id = trainer.id
 
-    if "name" in data:
-        parts = data["name"].split(" ", 1)
-        member.first_name = parts[0]
+    first_name = data.get("first_name")
+    last_name = data.get("last_name")
+
+    if first_name is not None or last_name is not None:
+        if first_name is not None:
+            member.first_name = first_name.strip()
+        if last_name is not None:
+            member.last_name = last_name.strip()
+    elif "name" in data:
+        parts = (data.get("name") or "").strip().split(" ", 1)
+        member.first_name = parts[0] if parts and parts[0] else None
         member.last_name = parts[1] if len(parts) > 1 else ""
 
     if "phone" in data:
-        member.phone = data["phone"]    
+        member.phone = (data.get("phone") or "").strip() or None
 
+    log_action(
+        "update_member",
+        entity="user",
+        entity_id=member.id,
+        details={
+            "gym_id": admin.gym_id,
+            "first_name": member.first_name,
+            "last_name": member.last_name,
+            "phone": member.phone,
+            "trainer_id": member.trainer_id,
+        },
+        session=db.session,
+    )
     db.session.commit()
     return jsonify(member.to_dict()), 200
 
@@ -242,6 +269,13 @@ def delete_member(id):
         gym_id=admin.gym_id
     ).delete()
 
+    log_action(
+        "delete_member",
+        entity="user",
+        entity_id=member.id,
+        details={"gym_id": admin.gym_id, "email": member.email},
+        session=db.session,
+    )
     db.session.delete(member)
     db.session.commit()
 
@@ -287,6 +321,14 @@ def invite_member():
     )
 
     db.session.add(member)
+    db.session.flush()
+    log_action(
+        "invite_member",
+        entity="user",
+        entity_id=member.id,
+        details={"gym_id": admin.gym_id, "email": member.email},
+        session=db.session,
+    )
     db.session.commit()
 
     send_gymadmin_invite_email(email, admin.gym.name, token, role="client")
@@ -361,6 +403,13 @@ def update_trainer(id):
     trainer.last_name = data.get("last_name", trainer.last_name)
     trainer.phone = data.get("phone", trainer.phone)
     trainer.bio = data.get("bio", trainer.bio)
+    log_action(
+        "update_trainer",
+        entity="user",
+        entity_id=trainer.id,
+        details={"gym_id": admin.gym_id, "email": trainer.email},
+        session=db.session,
+    )
     db.session.commit()
 
     return jsonify(trainer.to_dict()), 200
@@ -380,10 +429,69 @@ def delete_trainer(id):
         role="trainer"
     ).first_or_404()
 
+    log_action(
+        "delete_trainer",
+        entity="user",
+        entity_id=trainer.id,
+        details={"gym_id": admin.gym_id, "email": trainer.email},
+        session=db.session,
+    )
     db.session.delete(trainer)
     db.session.commit()
 
     return jsonify({"message": "Trainer deleted"}), 200
+
+
+@gymadmin_bp.patch("/trainers/<int:id>/deactivate")
+@jwt_required()
+@role_required("gymadmin")
+@gym_required
+def deactivate_trainer(id):
+    admin = current_admin()
+
+    trainer = User.query.filter_by(
+        id=id,
+        gym_id=admin.gym_id,
+        role="trainer"
+    ).first_or_404()
+
+    trainer.is_active = False
+    log_action(
+        "deactivate_trainer",
+        entity="user",
+        entity_id=trainer.id,
+        details={"gym_id": admin.gym_id, "email": trainer.email},
+        session=db.session,
+    )
+    db.session.commit()
+
+    return jsonify({"message": "Trainer deactivated"}), 200
+
+
+@gymadmin_bp.patch("/trainers/<int:id>/activate")
+@jwt_required()
+@role_required("gymadmin")
+@gym_required
+def activate_trainer(id):
+    admin = current_admin()
+
+    trainer = User.query.filter_by(
+        id=id,
+        gym_id=admin.gym_id,
+        role="trainer"
+    ).first_or_404()
+
+    trainer.is_active = True
+    log_action(
+        "activate_trainer",
+        entity="user",
+        entity_id=trainer.id,
+        details={"gym_id": admin.gym_id, "email": trainer.email},
+        session=db.session,
+    )
+    db.session.commit()
+
+    return jsonify({"message": "Trainer activated"}), 200
 
 @gymadmin_bp.post("/trainers/invite")
 @role_required("gymadmin")
@@ -432,6 +540,14 @@ def invite_trainer():
     )
 
     db.session.add(trainer)
+    db.session.flush()
+    log_action(
+        "invite_trainer",
+        entity="user",
+        entity_id=trainer.id,
+        details={"gym_id": admin.gym_id, "email": trainer.email},
+        session=db.session,
+    )
     db.session.commit()
 
     # 📧 Send invite AFTER commit
@@ -514,6 +630,13 @@ def renew_member(member_id):
     user.is_active = True
 
     db.session.add_all([sub, payment])
+    log_action(
+        "renew_member_subscription",
+        entity="subscription",
+        entity_id=member_id,
+        details={"gym_id": admin.gym_id, "plan": plan, "amount": float(amount)},
+        session=db.session,
+    )
     db.session.commit()
 
     return {"message": "Subscription renewed & payment recorded"}, 201
@@ -547,6 +670,13 @@ def assign_trainer(member_id):
     member.trainer_id = trainer.id
 
     try:
+        log_action(
+            "assign_trainer",
+            entity="user",
+            entity_id=member.id,
+            details={"gym_id": admin.gym_id, "trainer_id": trainer.id},
+            session=db.session,
+        )
         db.session.commit()
     except Exception:
         db.session.rollback()
@@ -598,6 +728,14 @@ def create_announcement():
     )
 
     db.session.add(announcement)
+    db.session.flush()
+    log_action(
+        "create_announcement",
+        entity="announcement",
+        entity_id=announcement.id,
+        details={"gym_id": admin.gym_id, "title": announcement.title},
+        session=db.session,
+    )
     db.session.commit()
 
     return jsonify(announcement.to_dict()), 201
@@ -624,6 +762,13 @@ def update_announcement(id):
     ann.message = data["message"]
     ann.tag = data.get("tag", ann.tag)
 
+    log_action(
+        "update_announcement",
+        entity="announcement",
+        entity_id=ann.id,
+        details={"gym_id": admin.gym_id, "title": ann.title, "tag": ann.tag},
+        session=db.session,
+    )
     db.session.commit()
     return jsonify(ann.to_dict()), 200
 
@@ -641,6 +786,13 @@ def delete_announcement(id):
         gym_id=admin.gym_id
     ).first_or_404()
 
+    log_action(
+        "delete_announcement",
+        entity="announcement",
+        entity_id=ann.id,
+        details={"gym_id": admin.gym_id, "title": ann.title},
+        session=db.session,
+    )
     db.session.delete(ann)
     db.session.commit()
 
@@ -706,6 +858,62 @@ def revenue_series():
         }
         for r in rows
     ]), 200
+
+
+@gymadmin_bp.get("/platform-billing")
+@jwt_required()
+@role_required("gymadmin")
+@gym_required
+def platform_billing_summary():
+    admin = current_admin()
+    active_members = get_active_member_count(admin.gym_id)
+    pricing_breakdown = calculate_gym_pricing(active_members)
+
+    return jsonify({
+        "gym_id": admin.gym_id,
+        "gym_name": admin.gym.name,
+        "currency": "KES",
+        "pricing_breakdown": pricing_breakdown,
+    }), 200
+
+
+@gymadmin_bp.get("/platform-billing/member-growth")
+@jwt_required()
+@role_required("gymadmin")
+@gym_required
+def platform_billing_member_growth():
+    admin = current_admin()
+
+    rows = (
+        db.session.query(
+            func.date_trunc("month", User.created_at).label("month"),
+            func.count(User.id).label("new_members"),
+        )
+        .filter(
+            User.gym_id == admin.gym_id,
+            User.role == "client",
+        )
+        .group_by(func.date_trunc("month", User.created_at))
+        .order_by(func.date_trunc("month", User.created_at).asc())
+        .all()
+    )
+
+    active_members = get_active_member_count(admin.gym_id)
+    pricing_breakdown = calculate_gym_pricing(active_members)
+
+    return jsonify({
+        "gym_id": admin.gym_id,
+        "gym_name": admin.gym.name,
+        "currency": "KES",
+        "current_pricing": pricing_breakdown,
+        "series": [
+            {
+                "month": row.month.date().isoformat(),
+                "new_members": row.new_members,
+            }
+            for row in rows
+        ],
+    }), 200
 
 
 @gymadmin_bp.get("/pricing")

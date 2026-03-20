@@ -1,4 +1,8 @@
 import os
+from dotenv import load_dotenv
+
+
+load_dotenv()
 
 class Config:
     SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret")
@@ -14,7 +18,7 @@ class Config:
     JWT_ACCESS_TOKEN_EXPIRES = False
 
     # 🌐 FRONTEND
-    FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+    FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
     # 📧 EMAIL
     MAIL_SERVER = os.getenv("MAIL_SERVER", "smtp.gmail.com")

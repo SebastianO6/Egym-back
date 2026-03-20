@@ -20,11 +20,13 @@ from models import (
 )
 from routes.decorators import role_required
 from utils.mailer import send_gymadmin_invite_email
+from utils.audit import log_action
+from utils.pricing import calculate_gym_pricing, get_active_member_count
 import secrets
 from datetime import datetime, timedelta
 import string
 import re
-from sqlalchemy import delete, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 
 superadmin_bp = Blueprint(
     "superadmin",
@@ -46,11 +48,7 @@ def get_gyms():
     today = datetime.utcnow()
 
     for gym in gyms:
-        members = User.query.filter_by(
-            gym_id=gym.id,
-            role="client",
-            is_active=True
-        ).count()
+        members = get_active_member_count(gym.id)
 
         admin = User.query.filter_by(
             gym_id=gym.id,
@@ -77,7 +75,7 @@ def get_gyms():
             if sub.end_date >= today:
                 subscription_status = "active"
 
-        monthly_revenue = members * 300
+        pricing_breakdown = calculate_gym_pricing(members)
 
         data.append({
             "id": gym.id,
@@ -88,7 +86,8 @@ def get_gyms():
             "phone": gym.phone or "",
             "owner_email": admin.email if admin else None,
             "members": members,
-            "monthly_revenue_ksh": monthly_revenue,
+            "monthly_revenue_ksh": pricing_breakdown["final_price"],
+            "pricing_breakdown": pricing_breakdown,
 
             # subscription info
             "subscription_plan": plan,
@@ -169,6 +168,13 @@ def renew_gym(gym_id):
     )
 
     db.session.add(new_sub)
+    log_action(
+        "renew_gym_subscription",
+        entity="gym_subscription",
+        entity_id=gym_id,
+        details={"gym_id": gym_id, "plan": plan},
+        session=db.session,
+    )
     db.session.commit()
 
     return {
@@ -260,6 +266,13 @@ def create_gym():
     )
     db.session.add(admin)
 
+    log_action(
+        "create_gym",
+        entity="gym",
+        entity_id=gym.id,
+        details={"name": gym.name, "slug": gym.slug, "admin_email": owner_email},
+        session=db.session,
+    )
     db.session.commit()
 
     # 4️⃣ Send invite email
@@ -305,6 +318,13 @@ def update_gym(gym_id):
     gym.address = data.get("address", gym.address)
     gym.status = data.get("status", gym.status)
 
+    log_action(
+        "update_gym",
+        entity="gym",
+        entity_id=gym.id,
+        details={"name": gym.name, "slug": gym.slug, "status": gym.status},
+        session=db.session,
+    )
     db.session.commit()
 
     return jsonify({
@@ -331,21 +351,17 @@ def platform_revenue():
     rows = []
 
     for gym in gyms:
-        members = User.query.filter_by(
-            gym_id=gym.id,
-            role="client",
-            is_active=True
-        ).count()
-
-        revenue = members * 300
-        total += revenue
+        members = get_active_member_count(gym.id)
+        pricing_breakdown = calculate_gym_pricing(members)
+        total += pricing_breakdown["final_price"]
 
         rows.append({
             "gym_id": gym.id,
             "gym_name": gym.name,
             "location": gym.address or "Not provided",
             "members": members,
-            "revenue_ksh": revenue
+            "revenue_ksh": pricing_breakdown["final_price"],
+            "pricing_breakdown": pricing_breakdown,
         })
 
     return jsonify({
@@ -353,6 +369,37 @@ def platform_revenue():
         "total_revenue": total,
         "gyms": rows
     }), 200
+
+
+@superadmin_bp.get("/billing/member-growth")
+@jwt_required()
+@role_required("superadmin")
+def member_growth_report():
+    rows = (
+        db.session.query(
+            Gym.id.label("gym_id"),
+            Gym.name.label("gym_name"),
+            func.date_trunc("month", User.created_at).label("month"),
+            func.count(User.id).label("new_members"),
+        )
+        .join(User, User.gym_id == Gym.id)
+        .filter(User.role == "client")
+        .group_by(Gym.id, Gym.name, func.date_trunc("month", User.created_at))
+        .order_by(func.date_trunc("month", User.created_at).desc(), Gym.name.asc())
+        .all()
+    )
+
+    return jsonify([
+        {
+            "gym_id": row.gym_id,
+            "gym_name": row.gym_name,
+            "month": row.month.date().isoformat(),
+            "new_members": row.new_members,
+            "active_members": get_active_member_count(row.gym_id),
+            "pricing_breakdown": calculate_gym_pricing(get_active_member_count(row.gym_id)),
+        }
+        for row in rows
+    ]), 200
 
 
 
@@ -382,6 +429,7 @@ def get_all_users():
 @role_required("superadmin")
 def delete_gym(gym_id):
     gym = Gym.query.get_or_404(gym_id)
+    gym_name = gym.name
     user_ids = db.session.execute(
         select(User.id).where(User.gym_id == gym.id)
     ).scalars().all()
@@ -486,6 +534,13 @@ def delete_gym(gym_id):
         db.session.execute(
             delete(GymSubscription).where(GymSubscription.gym_id == gym.id)
         )
+        log_action(
+            "delete_gym",
+            entity="gym",
+            entity_id=gym_id,
+            details={"name": gym_name},
+            session=db.session,
+        )
         db.session.execute(delete(Gym).where(Gym.id == gym.id))
         db.session.commit()
     except Exception:
@@ -521,6 +576,13 @@ def pending_pricing():
 def approve_pricing(pricing_id):
     pricing = GymPricing.query.get_or_404(pricing_id)
     pricing.approved = True
+    log_action(
+        "approve_pricing",
+        entity="gym_pricing",
+        entity_id=pricing.id,
+        details={"gym_id": pricing.gym_id},
+        session=db.session,
+    )
     db.session.commit()
 
     return {"message": f"Pricing for {pricing.gym.name} approved"}, 200
@@ -530,8 +592,9 @@ def approve_pricing(pricing_id):
 @jwt_required()
 @role_required("superadmin")
 def get_audit_logs():
-
-    logs = AuditLog.query.order_by(AuditLog.created_at.desc()).limit(100).all()
+    limit = request.args.get("limit", default=100, type=int)
+    limit = min(max(limit, 1), 500)
+    logs = AuditLog.query.order_by(AuditLog.created_at.desc()).limit(limit).all()
 
     return jsonify([
         {
@@ -545,6 +608,45 @@ def get_audit_logs():
         }
         for log in logs
     ])
+
+
+@superadmin_bp.delete("/audit-logs")
+@jwt_required()
+@role_required("superadmin")
+def delete_audit_logs():
+    data = request.get_json(silent=True) or {}
+    mode = (data.get("mode") or "older_than").strip().lower()
+
+    if mode == "all":
+        deleted_count = db.session.query(AuditLog).delete()
+        db.session.commit()
+        return jsonify({
+            "message": "All audit logs deleted",
+            "deleted_count": deleted_count,
+        }), 200
+
+    older_than_days = data.get("older_than_days", 30)
+
+    try:
+        older_than_days = int(older_than_days)
+    except (TypeError, ValueError):
+        return jsonify({"error": "older_than_days must be a number"}), 400
+
+    if older_than_days < 1:
+        return jsonify({"error": "older_than_days must be at least 1"}), 400
+
+    cutoff = datetime.utcnow() - timedelta(days=older_than_days)
+    deleted_count = (
+        db.session.query(AuditLog)
+        .filter(AuditLog.created_at < cutoff)
+        .delete()
+    )
+    db.session.commit()
+
+    return jsonify({
+        "message": f"Audit logs older than {older_than_days} days deleted",
+        "deleted_count": deleted_count,
+    }), 200
 
 
 @superadmin_bp.get("/gyms/<int:gym_id>/subscription")
@@ -587,6 +689,13 @@ def deactivate_gym(gym_id):
     for user in users:
         user.is_active = False
 
+    log_action(
+        "deactivate_gym",
+        entity="gym",
+        entity_id=gym.id,
+        details={"status": "inactive"},
+        session=db.session,
+    )
     db.session.commit()
 
     return {
@@ -607,6 +716,13 @@ def activate_gym(gym_id):
     for user in users:
         user.is_active = True
 
+    log_action(
+        "activate_gym",
+        entity="gym",
+        entity_id=gym.id,
+        details={"status": "active"},
+        session=db.session,
+    )
     db.session.commit()
 
     return {
