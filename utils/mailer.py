@@ -6,7 +6,8 @@ from email.message import EmailMessage
 def send_gymadmin_invite_email(email, gym_name, token, role="client"):
     cfg = current_app.config
 
-    invite_link = f"{cfg['FRONTEND_URL']}/accept-invite?token={token}"
+    frontend_url = (cfg.get("FRONTEND_URL") or "http://localhost:3000").rstrip("/")
+    invite_link = f"{frontend_url}/accept-invite?token={token}"
 
     # Role-aware subject & message
     if role == "trainer":

@@ -276,14 +276,22 @@ def create_gym():
     db.session.commit()
 
     # 4️⃣ Send invite email
-    send_gymadmin_invite_email(
-        email=admin.email,
-        gym_name=gym.name,
-        token=token
-    )
+    email_sent = True
+    warning = None
+
+    try:
+        send_gymadmin_invite_email(
+            email=admin.email,
+            gym_name=gym.name,
+            token=token
+        )
+    except Exception:
+        email_sent = False
+        warning = "Gym was created, but the invite email could not be sent."
+        current_app.logger.exception("Failed to send gym admin invite for gym %s", gym.id)
 
     return jsonify({
-        "message": "Gym created. Invite sent to gym admin.",
+        "message": "Gym created. Invite sent to gym admin." if email_sent else "Gym created, but invite email was not sent.",
         "gym": {
             "id": gym.id,
             "name": gym.name,
@@ -291,7 +299,9 @@ def create_gym():
             "join_url": build_join_url(gym.slug),
             "status": gym.status
         },
-        "admin_email": admin.email
+        "admin_email": admin.email,
+        "email_sent": email_sent,
+        "warning": warning
     }), 201
 
 

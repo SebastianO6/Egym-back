@@ -17,7 +17,7 @@ def _allowed_origins(frontend_url):
 
     if frontend_url:
         origins.update(
-            origin.strip()
+            origin.strip().rstrip("/")
             for origin in frontend_url.split(",")
             if origin.strip()
         )
@@ -70,7 +70,7 @@ def create_app():
 
     @app.after_request
     def add_cors_headers(response):
-        request_origin = request.headers.get("Origin")
+        request_origin = (request.headers.get("Origin") or "").rstrip("/")
         origin = request_origin if request_origin in allowed_origins else None
 
         if not origin and allowed_origins:
