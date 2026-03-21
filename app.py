@@ -13,6 +13,7 @@ def _allowed_origins(frontend_url):
         "http://127.0.0.1:3000",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        "https://e-gym-psi.vercel.app",
     }
 
     if frontend_url:
