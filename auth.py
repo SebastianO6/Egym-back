@@ -49,7 +49,7 @@ def login():
     
     if user.gym and user.gym.status != "active":
         return jsonify({
-            "message": "Gym subscription inactive. Contact platform support."
+            "message": "Gym account is not active yet. Contact your gym administration."
         }), 403
 
     access_token = create_access_token(
@@ -165,6 +165,9 @@ def accept_invite():
     user.set_password(password)
     user.is_active = True
     user.must_change_password = False
+
+    if user.role == "gymadmin" and user.gym:
+        user.gym.status = "active"
 
     user.invite_token = None
     user.invite_expires_at = None

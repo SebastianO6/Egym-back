@@ -237,7 +237,7 @@ def create_gym():
         slug=slug,
         phone=data.get("phone"),
         address=data.get("address"),
-        status="active"
+        status="pending"
     )
     db.session.add(gym)
     db.session.flush()  # ensures gym.id is available
