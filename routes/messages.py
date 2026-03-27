@@ -22,7 +22,7 @@ def get_conversation(partner_id):
         .all()
     )
 
-    messages.reverse()  # restore chronological order (oldest → newest)
+    messages.reverse()  
 
     return jsonify({
         "items": [m.to_dict(user_id) for m in messages]

@@ -6,7 +6,7 @@ import secrets
 from flask import g
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from extensions import db
+from extensions import db, socketio
 from models import User, Announcement
 from models.subscription import Subscription
 from models.payment import Payment
@@ -738,6 +738,12 @@ def create_announcement():
     )
     db.session.commit()
 
+    socketio.emit(
+        "announcement_created",
+        announcement.to_dict(),
+        room=f"gym_{admin.gym_id}",
+    )
+
     return jsonify(announcement.to_dict()), 201
 
 
@@ -770,6 +776,13 @@ def update_announcement(id):
         session=db.session,
     )
     db.session.commit()
+
+    socketio.emit(
+        "announcement_updated",
+        ann.to_dict(),
+        room=f"gym_{admin.gym_id}",
+    )
+
     return jsonify(ann.to_dict()), 200
 
 
@@ -785,6 +798,10 @@ def delete_announcement(id):
         id=id,
         gym_id=admin.gym_id
     ).first_or_404()
+    deleted_payload = {
+        "id": ann.id,
+        "gym_id": admin.gym_id,
+    }
 
     log_action(
         "delete_announcement",
@@ -795,6 +812,12 @@ def delete_announcement(id):
     )
     db.session.delete(ann)
     db.session.commit()
+
+    socketio.emit(
+        "announcement_deleted",
+        deleted_payload,
+        room=f"gym_{admin.gym_id}",
+    )
 
     return jsonify({"message": "Deleted"}), 200
 
