@@ -1,5 +1,6 @@
+from datetime import datetime, timezone
+
 from extensions import db
-from datetime import datetime
 
 class Message(db.Model):
     __tablename__ = "messages"
@@ -19,11 +20,22 @@ class Message(db.Model):
         db.Index("idx_chat_lookup", "sender_id", "receiver_id", "created_at"),
     )
 
+    @staticmethod
+    def _serialize_created_at(value):
+        if not value:
+            value = datetime.now(timezone.utc)
+        elif value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        else:
+            value = value.astimezone(timezone.utc)
+
+        return value.isoformat()
+
     def to_dict(self, current_user_id):
         return {
             "id": self.id,
             "content": self.content,
-            "created_at": self.created_at.isoformat() if self.created_at else datetime.utcnow().isoformat(),
+            "created_at": self._serialize_created_at(self.created_at),
             "sender_id": self.sender_id,
             "receiver_id": self.receiver_id,
             "is_mine": self.sender_id == current_user_id

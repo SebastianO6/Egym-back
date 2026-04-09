@@ -36,6 +36,7 @@ gymadmin_bp = Blueprint("gymadmin", __name__)
 def dashboard():
 
     admin = current_admin()
+    now = datetime.utcnow()
 
     members_count = User.query.filter_by(
         gym_id=admin.gym_id,
@@ -84,8 +85,40 @@ def dashboard():
         .all()
     )
 
+    active_subscriptions = Subscription.query.filter(
+        Subscription.gym_id == admin.gym_id,
+        Subscription.is_active == True,
+        Subscription.end_date >= now,
+    ).all()
+
+    active_subscription_map = {sub.user_id: sub for sub in active_subscriptions}
+    active_members_count = len(active_subscription_map)
+    inactive_members_count = max(members_count - active_members_count, 0)
+
+    expiring_members = []
+    for member in User.query.filter_by(gym_id=admin.gym_id, role="client").all():
+        sub = active_subscription_map.get(member.id)
+        if not sub:
+            continue
+
+        days_left = (sub.end_date.date() - now.date()).days
+        if 0 <= days_left <= 3:
+            expiring_members.append({
+                "id": member.id,
+                "email": member.email,
+                "daysLeft": days_left,
+                "subscription": {
+                    "plan": sub.plan,
+                    "end_date": sub.end_date.isoformat() if sub.end_date else None,
+                },
+            })
+
     return jsonify({
         "members": members_count,
+        "active_members": active_members_count,
+        "inactive_members": inactive_members_count,
+        "expired_members": inactive_members_count,
+        "expiring_members": expiring_members,
         "trainers": trainers_count,
         "revenue": {
             "today": today_revenue,

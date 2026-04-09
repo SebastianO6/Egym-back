@@ -1,5 +1,6 @@
+from datetime import datetime, timezone
+
 from extensions import db
-from datetime import datetime
 
 
 class Announcement(db.Model):
@@ -18,6 +19,17 @@ class Announcement(db.Model):
         nullable=False
     )
 
+    @staticmethod
+    def _serialize_datetime(value):
+        if not value:
+            value = datetime.now(timezone.utc)
+        elif value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        else:
+            value = value.astimezone(timezone.utc)
+
+        return value.isoformat()
+
     def to_dict(self):
         return {
             "id": self.id,
@@ -26,5 +38,5 @@ class Announcement(db.Model):
             "tag": self.tag,
             "gym_id": self.gym_id,
             "author_id": self.author_id,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_at": self._serialize_datetime(self.created_at),
         }
